@@ -23,7 +23,9 @@ public:
                   std::uint16_t product_id,
                   std::vector<std::uint8_t> packet_header,
                   std::size_t packet_length,
-                  Layout layout);
+                  Layout layout,
+                  std::optional<std::uint16_t> interface_usage_page = std::nullopt,
+                  std::optional<std::uint16_t> interface_usage = std::nullopt);
 
     [[nodiscard]] const std::string& name() const noexcept { return name_; }
     [[nodiscard]] std::uint16_t vendorId() const noexcept { return vendor_id_; }
@@ -32,6 +34,8 @@ public:
     [[nodiscard]] std::size_t packetLength() const noexcept { return packet_length_; }
     [[nodiscard]] const Layout& layout() const noexcept { return layout_; }
     [[nodiscard]] const std::vector<std::string>& keyLabels() const noexcept { return key_labels_; }
+    [[nodiscard]] std::optional<std::uint16_t> interfaceUsagePage() const noexcept { return interface_usage_page_; }
+    [[nodiscard]] std::optional<std::uint16_t> interfaceUsage() const noexcept { return interface_usage_; }
 
     [[nodiscard]] std::size_t keyCount() const noexcept { return key_labels_.size(); }
     [[nodiscard]] std::optional<std::size_t> indexForKey(const std::string& label) const;
@@ -47,6 +51,8 @@ private:
     Layout layout_;
     std::vector<std::string> key_labels_;
     std::unordered_map<std::string, std::size_t> key_to_index_;
+    std::optional<std::uint16_t> interface_usage_page_;
+    std::optional<std::uint16_t> interface_usage_;
 };
 
 }  // namespace kb::cfg

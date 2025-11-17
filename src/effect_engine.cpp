@@ -1,5 +1,6 @@
 #include "keyboard_configurator/effect_engine.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace kb::cfg {
@@ -10,9 +11,12 @@ EffectEngine::EffectEngine(const KeyboardModel& model, DeviceTransport& transpor
 void EffectEngine::setPresets(std::vector<std::unique_ptr<LightingPreset>> presets) {
     presets_ = std::move(presets);
     preset_ids_.clear();
+    preset_animated_.clear();
     preset_ids_.reserve(presets_.size());
+    preset_animated_.reserve(presets_.size());
     for (const auto& preset : presets_) {
         preset_ids_.push_back(preset->id());
+        preset_animated_.push_back(preset->isAnimated());
     }
     frame_.resize(model_.keyCount());
     preset_enabled_.assign(presets_.size(), true);
@@ -69,6 +73,17 @@ bool EffectEngine::presetEnabled(std::size_t index) const {
         return true;
     }
     return preset_enabled_[index];
+}
+
+bool EffectEngine::hasAnimatedEnabled() const {
+    for (std::size_t i = 0; i < presets_.size(); ++i) {
+        const bool enabled = preset_enabled_.empty() ? true : preset_enabled_[i];
+        const bool animated = preset_animated_.size() > i ? preset_animated_[i] : presets_[i]->isAnimated();
+        if (enabled && animated) {
+            return true;
+        }
+    }
+    return false;
 }
 
 }  // namespace kb::cfg

@@ -13,6 +13,7 @@ public:
     void render(const KeyboardModel& model,
                 double time_seconds,
                 KeyColorFrame& frame) override;
+    [[nodiscard]] bool isAnimated() const noexcept override { return false; }
 
 private:
     RgbColor color_;

@@ -27,6 +27,7 @@ private:
     };
 
     bool ensureInitialized();
+    hid_device* openMatchingInterface(const KeyboardModel& model);
 
     std::mutex mutex_;
     std::unique_ptr<hid_device, HidDeleter> handle_;

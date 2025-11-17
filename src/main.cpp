@@ -48,7 +48,10 @@ int main(int argc, char** argv) {
         EffectEngine engine(runtime.model, *transport);
         engine.setPresets(std::move(runtime.presets));
 
-        ConfiguratorCLI cli(runtime.model, engine, std::move(runtime.preset_parameters));
+        ConfiguratorCLI cli(runtime.model,
+                            engine,
+                            std::move(runtime.preset_parameters),
+                            runtime.frame_interval);
         cli.run();
 
         return 0;

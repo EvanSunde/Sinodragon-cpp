@@ -17,6 +17,7 @@ public:
     virtual void render(const KeyboardModel& model,
                         double time_seconds,
                         KeyColorFrame& frame) = 0;
+    [[nodiscard]] virtual bool isAnimated() const noexcept { return false; }
 };
 
 }  // namespace kb::cfg

@@ -26,6 +26,7 @@ public:
     [[nodiscard]] const LightingPreset& presetAt(std::size_t index) const;
     void setPresetEnabled(std::size_t index, bool enabled);
     [[nodiscard]] bool presetEnabled(std::size_t index) const;
+    [[nodiscard]] bool hasAnimatedEnabled() const;
 
 private:
     const KeyboardModel& model_;
@@ -34,6 +35,7 @@ private:
     std::vector<std::unique_ptr<LightingPreset>> presets_;
     std::vector<std::string> preset_ids_;
     std::vector<bool> preset_enabled_;
+    std::vector<bool> preset_animated_;
 };
 
 }  // namespace kb::cfg

@@ -1,11 +1,8 @@
 #include "keyboard_configurator/configurator_cli.hpp"
 
-#include <atomic>
-#include <chrono>
+#include <algorithm>
 #include <iostream>
 #include <sstream>
-#include <string>
-#include <thread>
 
 #include "keyboard_configurator/effect_engine.hpp"
 #include "keyboard_configurator/keyboard_model.hpp"
@@ -14,10 +11,18 @@ namespace kb::cfg {
 
 ConfiguratorCLI::ConfiguratorCLI(const KeyboardModel& model,
                                  EffectEngine& engine,
-                                 std::vector<ParameterMap> preset_parameters)
+                                 std::vector<ParameterMap> preset_parameters,
+                                 std::chrono::milliseconds frame_interval)
     : model_(model),
       engine_(engine),
-      preset_parameters_(std::move(preset_parameters)) {}
+      preset_parameters_(std::move(preset_parameters)),
+      stop_flag_(false),
+      frame_interval_ms_(std::max(1, static_cast<int>(frame_interval.count()))),
+      loop_running_(false) {}
+
+ConfiguratorCLI::~ConfiguratorCLI() {
+    stopRenderLoop();
+}
 
 void ConfiguratorCLI::printBanner() const {
     std::cout << "Keyboard: " << model_.name() << " (" << model_.vendorId()
@@ -30,7 +35,7 @@ void ConfiguratorCLI::printHelp() const {
               << "  list                     - list presets" << '\n'
               << "  toggle <index>          - toggle preset on/off" << '\n'
               << "  set <index> <key> <val> - set preset parameter" << '\n'
-              << "  frame <ms>              - set frame interval" << '\n'
+              << "  frame <ms>              - set frame interval for animated presets" << '\n'
               << "  quit                     - exit" << '\n';
 }
 
@@ -41,8 +46,14 @@ void ConfiguratorCLI::printPresets() {
     for (std::size_t i = 0; i < count; ++i) {
         const auto& preset = engine_.presetAt(i);
         const bool enabled = engine_.presetEnabled(i);
-        std::cout << "  [" << i << "] " << preset.id() << (enabled ? " (on)" : " (off)");
-        if (i < preset_parameters_.size()) {
+        std::cout << "  [" << i << "] " << preset.id()
+                  << (enabled ? " (on" : " (off");
+        if (preset.isAnimated()) {
+            std::cout << ", animated";
+        }
+        std::cout << ")";
+
+        if (i < preset_parameters_.size() && !preset_parameters_[i].empty()) {
             std::cout << " params={";
             bool first = true;
             for (const auto& [key, value] : preset_parameters_[i]) {
@@ -52,7 +63,7 @@ void ConfiguratorCLI::printPresets() {
                 std::cout << key << '=' << value;
                 first = false;
             }
-            std::cout << "}";
+            std::cout << '}';
         }
         std::cout << '\n';
     }
@@ -86,29 +97,75 @@ bool ConfiguratorCLI::setPresetParameter(std::size_t index,
     return true;
 }
 
+bool ConfiguratorCLI::engineHasAnimated() const {
+    std::lock_guard<std::mutex> guard(engine_mutex_);
+    return engine_.hasAnimatedEnabled();
+}
+
+void ConfiguratorCLI::renderOnce(double time_seconds) {
+    std::lock_guard<std::mutex> guard(engine_mutex_);
+    engine_.renderFrame(time_seconds);
+    engine_.pushFrame();
+}
+
+void ConfiguratorCLI::startRenderLoop() {
+    if (loop_running_.load()) {
+        return;
+    }
+
+    stop_flag_.store(false);
+    loop_running_.store(true);
+    start_time_ = std::chrono::steady_clock::now();
+
+    render_thread_ = std::thread([this]() {
+        while (!stop_flag_.load()) {
+            auto now = std::chrono::steady_clock::now();
+            double elapsed = std::chrono::duration<double>(now - start_time_).count();
+            renderOnce(elapsed);
+
+            int interval = frame_interval_ms_.load();
+            if (interval < 1) {
+                interval = 1;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(interval));
+        }
+        loop_running_.store(false);
+    });
+}
+
+void ConfiguratorCLI::stopRenderLoop() {
+    if (!loop_running_.load()) {
+        return;
+    }
+    stop_flag_.store(true);
+    if (render_thread_.joinable()) {
+        render_thread_.join();
+        render_thread_ = std::thread();
+    }
+    loop_running_.store(false);
+}
+
+void ConfiguratorCLI::syncRenderState(bool refresh_static_frame) {
+    const bool animated = engineHasAnimated();
+    if (animated) {
+        if (!loop_running_.load()) {
+            renderOnce(0.0);
+            startRenderLoop();
+        }
+    } else {
+        stopRenderLoop();
+        if (refresh_static_frame) {
+            renderOnce(0.0);
+        }
+    }
+}
+
 void ConfiguratorCLI::run() {
     printBanner();
     printHelp();
     printPresets();
 
-    std::atomic<bool> stop{false};
-    std::chrono::milliseconds frame_interval{33};
-
-    std::thread render_thread([this, &stop, &frame_interval]() {
-        auto start = std::chrono::steady_clock::now();
-        while (!stop.load()) {
-            auto now = std::chrono::steady_clock::now();
-            double elapsed = std::chrono::duration<double>(now - start).count();
-
-            {
-                std::lock_guard<std::mutex> guard(engine_mutex_);
-                engine_.renderFrame(elapsed);
-                engine_.pushFrame();
-            }
-
-            std::this_thread::sleep_for(frame_interval);
-        }
-    });
+    syncRenderState(true);
 
     std::string line;
     while (true) {
@@ -132,6 +189,7 @@ void ConfiguratorCLI::run() {
             if (!(iss >> index) || !togglePreset(index)) {
                 std::cout << "Invalid preset index" << '\n';
             } else {
+                syncRenderState(true);
                 std::cout << "Toggled preset " << index << '\n';
             }
         } else if (cmd == "set") {
@@ -141,6 +199,7 @@ void ConfiguratorCLI::run() {
             if (!(iss >> index >> key >> value) || !setPresetParameter(index, key, value)) {
                 std::cout << "Invalid set command" << '\n';
             } else {
+                syncRenderState(true);
                 std::cout << "Updated preset " << index << " parameter " << key << '\n';
             }
         } else if (cmd == "frame") {
@@ -148,7 +207,7 @@ void ConfiguratorCLI::run() {
             if (!(iss >> interval_ms) || interval_ms <= 0) {
                 std::cout << "Invalid frame interval" << '\n';
             } else {
-                frame_interval = std::chrono::milliseconds(interval_ms);
+                frame_interval_ms_.store(interval_ms);
                 std::cout << "Frame interval set to " << interval_ms << " ms" << '\n';
             }
         } else if (cmd == "quit" || cmd == "exit") {
@@ -158,11 +217,7 @@ void ConfiguratorCLI::run() {
         }
     }
 
-    stop.store(true);
-    if (render_thread.joinable()) {
-        render_thread.join();
-    }
-
+    stopRenderLoop();
     std::cout << "Exiting configurator" << '\n';
 }
 

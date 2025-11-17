@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -16,6 +17,9 @@ struct RuntimeConfig {
     std::unique_ptr<DeviceTransport> transport;
     std::vector<std::unique_ptr<LightingPreset>> presets;
     std::vector<ParameterMap> preset_parameters;
+    std::chrono::milliseconds frame_interval{std::chrono::milliseconds{33}};
+    std::optional<std::uint16_t> interface_usage_page;
+    std::optional<std::uint16_t> interface_usage;
 };
 
 class ConfigLoader {

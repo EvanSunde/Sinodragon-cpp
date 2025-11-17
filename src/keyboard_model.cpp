@@ -7,10 +7,10 @@
 namespace kb::cfg {
 
 namespace {
-Layout flattenLayout(const KeyboardModel::Layout& layout,
-                     std::vector<std::string>& key_labels,
-                     std::unordered_map<std::string, std::size_t>& key_to_index) {
-    Layout flattened;
+KeyboardModel::Layout flattenLayout(const KeyboardModel::Layout& layout,
+                                    std::vector<std::string>& key_labels,
+                                    std::unordered_map<std::string, std::size_t>& key_to_index) {
+    KeyboardModel::Layout flattened;
     std::size_t index = 0;
     for (const auto& row : layout) {
         KeyboardModel::LayoutRow flat_row;
@@ -33,12 +33,16 @@ KeyboardModel::KeyboardModel(std::string name,
                              std::uint16_t product_id,
                              std::vector<std::uint8_t> packet_header,
                              std::size_t packet_length,
-                             Layout layout)
+                             Layout layout,
+                             std::optional<std::uint16_t> interface_usage_page,
+                             std::optional<std::uint16_t> interface_usage)
     : name_(std::move(name)),
       vendor_id_(vendor_id),
       product_id_(product_id),
       packet_header_(std::move(packet_header)),
-      packet_length_(packet_length) {
+      packet_length_(packet_length),
+      interface_usage_page_(interface_usage_page),
+      interface_usage_(interface_usage) {
     layout_ = flattenLayout(layout, key_labels_, key_to_index_);
 }
 

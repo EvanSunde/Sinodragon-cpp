@@ -9,6 +9,8 @@
 #include <string>
 #include <unordered_map>
 
+#include <optional>
+
 #include "keyboard_configurator/hidapi_transport.hpp"
 #include "keyboard_configurator/logging_transport.hpp"
 
@@ -123,6 +125,9 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     std::filesystem::path layout_path;
     std::string transport_id;
     std::vector<PresetSpec> preset_specs;
+    std::uint32_t frame_interval_ms = 33;
+    std::optional<std::uint16_t> interface_usage_page;
+    std::optional<std::uint16_t> interface_usage;
 
     std::string line;
     std::size_t line_number = 0;
@@ -133,9 +138,16 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
             continue;
         }
 
-        if (line.rfind("preset=", 0) == 0) {
-            std::string rest = line.substr(std::string("preset=").size());
-            std::istringstream iss(rest);
+        if (line.rfind("preset", 0) == 0) {
+            std::string remainder = line.substr(std::string("preset").size());
+            remainder = trim(remainder);
+            if (remainder.empty() || remainder[0] != '=') {
+                throw std::runtime_error("Invalid preset declaration on line " + std::to_string(line_number));
+            }
+            remainder.erase(0, 1);  // remove '='
+            remainder = trim(remainder);
+
+            std::istringstream iss(remainder);
             PresetSpec spec;
             if (!(iss >> spec.id)) {
                 throw std::runtime_error("Missing preset identifier on line " + std::to_string(line_number));
@@ -175,6 +187,12 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
             layout_path = base_dir / value;
         } else if (key == "transport") {
             transport_id = value;
+        } else if (key == "engine.frame_interval_ms") {
+            frame_interval_ms = static_cast<std::uint32_t>(parseNumber(value));
+        } else if (key == "keyboard.interface_usage_page") {
+            interface_usage_page = static_cast<std::uint16_t>(parseNumber(value));
+        } else if (key == "keyboard.interface_usage") {
+            interface_usage = static_cast<std::uint16_t>(parseNumber(value));
         } else {
             throw std::runtime_error("Unknown configuration key: " + key);
         }
@@ -201,6 +219,8 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
 
     auto layout = readLayout(layout_path);
 
+    const auto frame_interval = std::chrono::milliseconds(frame_interval_ms == 0 ? 1 : frame_interval_ms);
+
     RuntimeConfig runtime_config{
         KeyboardModel(
             keyboard_name,
@@ -208,10 +228,15 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
             product_id,
             packet_header,
             packet_length,
-            std::move(layout)),
+            std::move(layout),
+            interface_usage_page,
+            interface_usage),
         nullptr,
         {},
-        {}
+        {},
+        frame_interval,
+        interface_usage_page,
+        interface_usage
     };
 
     runtime_config.transport = createTransport(transport_id);

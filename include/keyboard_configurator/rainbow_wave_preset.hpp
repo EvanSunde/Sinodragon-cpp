@@ -11,6 +11,7 @@ public:
     void render(const KeyboardModel& model,
                 double time_seconds,
                 KeyColorFrame& frame) override;
+    [[nodiscard]] bool isAnimated() const noexcept override { return true; }
 
 private:
     double speed_{0.5};
