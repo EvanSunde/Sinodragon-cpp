@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <vector>
 
@@ -20,6 +21,11 @@ public:
 
     [[nodiscard]] const KeyColorFrame& frame() const noexcept { return frame_; }
     [[nodiscard]] const std::vector<std::string>& presetIds() const noexcept { return preset_ids_; }
+    [[nodiscard]] std::size_t presetCount() const noexcept { return presets_.size(); }
+    [[nodiscard]] LightingPreset& presetAt(std::size_t index);
+    [[nodiscard]] const LightingPreset& presetAt(std::size_t index) const;
+    void setPresetEnabled(std::size_t index, bool enabled);
+    [[nodiscard]] bool presetEnabled(std::size_t index) const;
 
 private:
     const KeyboardModel& model_;
@@ -27,6 +33,7 @@ private:
     KeyColorFrame frame_;
     std::vector<std::unique_ptr<LightingPreset>> presets_;
     std::vector<std::string> preset_ids_;
+    std::vector<bool> preset_enabled_;
 };
 
 }  // namespace kb::cfg

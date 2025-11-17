@@ -9,8 +9,8 @@
 #include <string>
 #include <unordered_map>
 
+#include "keyboard_configurator/hidapi_transport.hpp"
 #include "keyboard_configurator/logging_transport.hpp"
-#include "keyboard_configurator/static_color_preset.hpp"
 
 namespace kb::cfg {
 namespace {
@@ -96,6 +96,8 @@ KeyboardModel::Layout readLayout(const std::filesystem::path& path) {
 std::unique_ptr<DeviceTransport> createTransport(const std::string& id) {
     if (id == "logging") {
         return std::make_unique<LoggingTransport>();
+    } else if (id == "hidapi") {
+        return std::make_unique<HidapiTransport>();
     }
     throw std::runtime_error("Unsupported transport: " + id);
 }
@@ -208,6 +210,7 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
             packet_length,
             std::move(layout)),
         nullptr,
+        {},
         {}
     };
 
@@ -220,11 +223,13 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         auto preset = registry_.create(spec.id);
         preset->configure(spec.params);
         runtime_config.presets.push_back(std::move(preset));
+        runtime_config.preset_parameters.push_back(std::move(spec.params));
     }
 
     if (runtime_config.presets.empty()) {
         auto default_preset = registry_.create("static_color");
         runtime_config.presets.push_back(std::move(default_preset));
+        runtime_config.preset_parameters.emplace_back();
     }
 
     return runtime_config;

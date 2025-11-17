@@ -4,7 +4,7 @@
 #include "keyboard_configurator/config_loader.hpp"
 #include "keyboard_configurator/configurator_cli.hpp"
 #include "keyboard_configurator/effect_engine.hpp"
-#include "keyboard_configurator/logging_transport.hpp"
+
 #include "keyboard_configurator/rainbow_wave_preset.hpp"
 #include "keyboard_configurator/static_color_preset.hpp"
 
@@ -12,7 +12,6 @@ using kb::cfg::ConfigLoader;
 using kb::cfg::ConfiguratorCLI;
 using kb::cfg::DeviceTransport;
 using kb::cfg::EffectEngine;
-using kb::cfg::LoggingTransport;
 using kb::cfg::PresetRegistry;
 using kb::cfg::RainbowWavePreset;
 using kb::cfg::RuntimeConfig;
@@ -49,7 +48,7 @@ int main(int argc, char** argv) {
         EffectEngine engine(runtime.model, *transport);
         engine.setPresets(std::move(runtime.presets));
 
-        ConfiguratorCLI cli(runtime.model, engine);
+        ConfiguratorCLI cli(runtime.model, engine, std::move(runtime.preset_parameters));
         cli.run();
 
         return 0;
