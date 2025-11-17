@@ -16,6 +16,8 @@ public:
     EffectEngine(const KeyboardModel& model, DeviceTransport& transport);
 
     void setPresets(std::vector<std::unique_ptr<LightingPreset>> presets);
+    void setPresets(std::vector<std::unique_ptr<LightingPreset>> presets,
+                    std::vector<std::vector<bool>> masks);
     void renderFrame(double time_seconds);
     bool pushFrame();
 
@@ -36,6 +38,7 @@ private:
     std::vector<std::string> preset_ids_;
     std::vector<bool> preset_enabled_;
     std::vector<bool> preset_animated_;
+    std::vector<std::vector<bool>> preset_masks_;
 };
 
 }  // namespace kb::cfg

@@ -20,6 +20,8 @@ struct RuntimeConfig {
     std::chrono::milliseconds frame_interval{std::chrono::milliseconds{33}};
     std::optional<std::uint16_t> interface_usage_page;
     std::optional<std::uint16_t> interface_usage;
+    std::vector<std::vector<bool>> preset_masks;
+    std::vector<bool> preset_enabled;
 };
 
 class ConfigLoader {

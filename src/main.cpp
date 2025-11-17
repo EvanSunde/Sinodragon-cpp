@@ -7,6 +7,8 @@
 
 #include "keyboard_configurator/rainbow_wave_preset.hpp"
 #include "keyboard_configurator/static_color_preset.hpp"
+#include "keyboard_configurator/star_matrix_preset.hpp"
+#include "keyboard_configurator/key_map_preset.hpp"
 
 using kb::cfg::ConfigLoader;
 using kb::cfg::ConfiguratorCLI;
@@ -16,6 +18,8 @@ using kb::cfg::PresetRegistry;
 using kb::cfg::RainbowWavePreset;
 using kb::cfg::RuntimeConfig;
 using kb::cfg::StaticColorPreset;
+using kb::cfg::StarMatrixPreset;
+using kb::cfg::KeyMapPreset;
 
 namespace {
 
@@ -23,6 +27,8 @@ PresetRegistry buildRegistry() {
     PresetRegistry registry;
     registry.registerPreset("static_color", [] { return std::make_unique<StaticColorPreset>(); });
     registry.registerPreset("rainbow_wave", [] { return std::make_unique<RainbowWavePreset>(); });
+    registry.registerPreset("star_matrix", [] { return std::make_unique<StarMatrixPreset>(); });
+    registry.registerPreset("key_map", [] { return std::make_unique<KeyMapPreset>(); });
     return registry;
 }
 
@@ -46,7 +52,11 @@ int main(int argc, char** argv) {
         }
 
         EffectEngine engine(runtime.model, *transport);
-        engine.setPresets(std::move(runtime.presets));
+        engine.setPresets(std::move(runtime.presets), std::move(runtime.preset_masks));
+        // Apply enabled flags from config
+        for (std::size_t i = 0; i < runtime.preset_enabled.size(); ++i) {
+            engine.setPresetEnabled(i, runtime.preset_enabled[i]);
+        }
 
         ConfiguratorCLI cli(runtime.model,
                             engine,

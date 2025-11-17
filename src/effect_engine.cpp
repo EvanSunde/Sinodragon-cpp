@@ -12,6 +12,7 @@ void EffectEngine::setPresets(std::vector<std::unique_ptr<LightingPreset>> prese
     presets_ = std::move(presets);
     preset_ids_.clear();
     preset_animated_.clear();
+    preset_masks_.clear();
     preset_ids_.reserve(presets_.size());
     preset_animated_.reserve(presets_.size());
     for (const auto& preset : presets_) {
@@ -19,7 +20,30 @@ void EffectEngine::setPresets(std::vector<std::unique_ptr<LightingPreset>> prese
         preset_animated_.push_back(preset->isAnimated());
     }
     frame_.resize(model_.keyCount());
-    preset_enabled_.assign(presets_.size(), true);
+    // Default: only preset 0 enabled, others off
+    preset_enabled_.assign(presets_.size(), false);
+    if (!preset_enabled_.empty()) {
+        preset_enabled_[0] = true;
+    }
+    // Default masks: all keys affected per preset
+    preset_masks_.resize(presets_.size());
+    for (auto& mask : preset_masks_) {
+        mask.assign(model_.keyCount(), true);
+    }
+}
+
+void EffectEngine::setPresets(std::vector<std::unique_ptr<LightingPreset>> presets,
+                              std::vector<std::vector<bool>> masks) {
+    setPresets(std::move(presets));
+    // Override masks if provided and sized correctly
+    if (masks.size() == preset_masks_.size()) {
+        const auto kc = model_.keyCount();
+        for (std::size_t i = 0; i < masks.size(); ++i) {
+            if (masks[i].size() == kc) {
+                preset_masks_[i] = std::move(masks[i]);
+            }
+        }
+    }
 }
 
 void EffectEngine::renderFrame(double time_seconds) {
@@ -28,11 +52,30 @@ void EffectEngine::renderFrame(double time_seconds) {
     }
 
     frame_.fill({0, 0, 0});
+    KeyColorFrame temp(model_.keyCount());
     for (std::size_t idx = 0; idx < presets_.size(); ++idx) {
         if (!preset_enabled_.empty() && !preset_enabled_[idx]) {
             continue;
         }
-        presets_[idx]->render(model_, time_seconds, frame_);
+        // Render into a temporary frame, then apply masked overlay
+        temp.resize(model_.keyCount());
+        temp.fill({0, 0, 0});
+        presets_[idx]->render(model_, time_seconds, temp);
+        const auto& mask = (idx < preset_masks_.size()) ? preset_masks_[idx] : std::vector<bool>();
+        if (!mask.empty()) {
+            const auto kc = model_.keyCount();
+            for (std::size_t k = 0; k < kc; ++k) {
+                if (mask[k]) {
+                    frame_.setColor(k, temp.color(k));
+                }
+            }
+        } else {
+            // No mask provided, apply all
+            const auto kc = model_.keyCount();
+            for (std::size_t k = 0; k < kc; ++k) {
+                frame_.setColor(k, temp.color(k));
+            }
+        }
     }
 }
 

@@ -74,6 +74,16 @@ KeyboardModel::Layout readLayout(const std::filesystem::path& path) {
         if (line.empty() || line[0] == '#') {
             continue;
         }
+        // Strip inline comments after '#'
+        {
+            auto hash_pos = line.find('#');
+            if (hash_pos != std::string::npos) {
+                line = trim(line.substr(0, hash_pos));
+                if (line.empty()) {
+                    continue;
+                }
+            }
+        }
         KeyboardModel::LayoutRow row;
         std::istringstream line_stream(line);
         std::string token;
@@ -104,6 +114,32 @@ std::unique_ptr<DeviceTransport> createTransport(const std::string& id) {
     throw std::runtime_error("Unsupported transport: " + id);
 }
 
+std::vector<std::string> parseList(const std::string& value) {
+    std::vector<std::string> items;
+    std::string normalized = value;
+    // replace semicolons with commas too
+    std::replace(normalized.begin(), normalized.end(), ';', ',');
+    std::istringstream iss(normalized);
+    std::string token;
+    while (std::getline(iss, token, ',')) {
+        token = trim(token);
+        if (!token.empty()) {
+            items.push_back(token);
+        }
+    }
+    return items;
+}
+
+bool parseBool(const std::string& value) {
+    std::string v;
+    v.reserve(value.size());
+    for (char c : value) v.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    if (v == "1" || v == "true" || v == "yes" || v == "on") return true;
+    if (v == "0" || v == "false" || v == "no" || v == "off") return false;
+    // Fallback: non-empty treated as true
+    return !v.empty();
+}
+
 }  // namespace
 
 ConfigLoader::ConfigLoader(const PresetRegistry& registry)
@@ -129,6 +165,12 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     std::optional<std::uint16_t> interface_usage_page;
     std::optional<std::uint16_t> interface_usage;
 
+    // Zones and per-preset assignments
+    std::unordered_map<std::string, std::vector<std::string>> zones;
+    std::unordered_map<std::size_t, std::vector<std::string>> preset_keys;
+    std::unordered_map<std::size_t, std::vector<std::string>> preset_zone_names;
+    std::unordered_map<std::size_t, bool> preset_enabled_overrides;
+
     std::string line;
     std::size_t line_number = 0;
     while (std::getline(in, line)) {
@@ -138,7 +180,8 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
             continue;
         }
 
-        if (line.rfind("preset", 0) == 0) {
+        // Only treat lines starting with 'preset' followed by whitespace or '=' as preset declarations.
+        if (line.rfind("preset", 0) == 0 && (line.size() == 6 || std::isspace(static_cast<unsigned char>(line[6])) || line[6] == '=')) {
             std::string remainder = line.substr(std::string("preset").size());
             remainder = trim(remainder);
             if (remainder.empty() || remainder[0] != '=') {
@@ -193,6 +236,29 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
             interface_usage_page = static_cast<std::uint16_t>(parseNumber(value));
         } else if (key == "keyboard.interface_usage") {
             interface_usage = static_cast<std::uint16_t>(parseNumber(value));
+        } else if (key.rfind("zone.", 0) == 0) {
+            // zone.<name> = key1,key2,...
+            std::string zone_name = key.substr(std::string("zone.").size());
+            zones[zone_name] = parseList(value);
+        } else if (key.rfind("preset.", 0) == 0) {
+            // preset.<index>.<field>
+            auto rest = key.substr(std::string("preset.").size());
+            auto dot = rest.find('.');
+            if (dot == std::string::npos) {
+                throw std::runtime_error("Invalid preset.* key on line " + std::to_string(line_number));
+            }
+            auto index_str = trim(rest.substr(0, dot));
+            auto field = trim(rest.substr(dot + 1));
+            std::size_t pindex = static_cast<std::size_t>(parseNumber(index_str));
+            if (field == "keys") {
+                preset_keys[pindex] = parseList(value);
+            } else if (field == "zones") {
+                preset_zone_names[pindex] = parseList(value);
+            } else if (field == "enabled") {
+                preset_enabled_overrides[pindex] = parseBool(value);
+            } else {
+                throw std::runtime_error("Unknown configuration key: " + key);
+            }
         } else {
             throw std::runtime_error("Unknown configuration key: " + key);
         }
@@ -236,7 +302,9 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         {},
         frame_interval,
         interface_usage_page,
-        interface_usage
+        interface_usage,
+        {},
+        {}
     };
 
     runtime_config.transport = createTransport(transport_id);
@@ -255,6 +323,52 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         auto default_preset = registry_.create("static_color");
         runtime_config.presets.push_back(std::move(default_preset));
         runtime_config.preset_parameters.emplace_back();
+    }
+
+    // Build masks and enabled flags
+    const auto kc = runtime_config.model.keyCount();
+    const auto pc = runtime_config.presets.size();
+    runtime_config.preset_masks.assign(pc, std::vector<bool>(kc, true));
+    runtime_config.preset_enabled.assign(pc, false);
+    if (pc > 0) runtime_config.preset_enabled[0] = true;
+
+    auto applyKeysToMask = [&](std::size_t pidx, const std::vector<std::string>& keys){
+        auto& mask = runtime_config.preset_masks[pidx];
+        std::fill(mask.begin(), mask.end(), false);
+        for (const auto& label : keys) {
+            if (auto opt = runtime_config.model.indexForKey(label)) {
+                mask[*opt] = true;
+            }
+        }
+    };
+
+    for (const auto& kv : preset_keys) {
+        if (kv.first < pc) {
+            applyKeysToMask(kv.first, kv.second);
+        }
+    }
+    for (const auto& kv : preset_zone_names) {
+        if (kv.first < pc) {
+            auto it = kv.second.begin();
+            // If zones specified, start from empty mask
+            auto& mask = runtime_config.preset_masks[kv.first];
+            std::fill(mask.begin(), mask.end(), false);
+            for (; it != kv.second.end(); ++it) {
+                auto zit = zones.find(*it);
+                if (zit != zones.end()) {
+                    for (const auto& label : zit->second) {
+                        if (auto opt = runtime_config.model.indexForKey(label)) {
+                            mask[*opt] = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (const auto& kv : preset_enabled_overrides) {
+        if (kv.first < pc) {
+            runtime_config.preset_enabled[kv.first] = kv.second;
+        }
     }
 
     return runtime_config;

@@ -22,6 +22,8 @@ add_library(keyboard_configurator STATIC
     src/preset_registry.cpp
     src/static_color_preset.cpp
     src/rainbow_wave_preset.cpp
+    src/key_map_preset.cpp
+    src/star_matrix_preset.cpp
     src/effect_engine.cpp
     src/config_loader.cpp
     src/configurator_cli.cpp

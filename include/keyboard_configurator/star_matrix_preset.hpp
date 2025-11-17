@@ -1,11 +1,15 @@
 #pragma once
 
+#include <vector>
+
 #include "keyboard_configurator/preset.hpp"
 
 namespace kb::cfg {
 
-class RainbowWavePreset : public LightingPreset {
+class StarMatrixPreset : public LightingPreset {
 public:
+    StarMatrixPreset();
+
     std::string id() const override;
     void configure(const ParameterMap& params) override;
     void render(const KeyboardModel& model,
@@ -14,13 +18,13 @@ public:
     [[nodiscard]] bool isAnimated() const noexcept override { return true; }
 
 private:
-    double speed_{0.5};
-    double scale_{0.15};
-    double saturation_{1.0};
-    double value_{1.0};
-    bool use_tint_{false};
-    double tint_mix_{0.5};
-    RgbColor tint_{};
+    // Parameters
+    RgbColor star_color_{};     // default white
+    RgbColor background_{};     // default black
+    double density_{0.15};      // fraction of keys twinkling at a time
+    double speed_{1.5};         // speed of twinkle cycle
+
+    static std::uint32_t hash32(std::uint32_t x);
 };
 
 }  // namespace kb::cfg
