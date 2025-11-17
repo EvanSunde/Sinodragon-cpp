@@ -1,0 +1,16 @@
+Esc,Backtick,Tab,Caps,Shift,Ctrl
+F1,1,Q,A,Z,Win
+F2,2,W,S,X,Alt
+F3,3,E,D,C,NAN
+F4,4,R,F,V,NAN
+F5,5,T,G,B,Space
+F6,6,Y,H,N,NAN
+F7,7,U,J,M,NAN
+F8,8,I,K,Comma,Alt
+F9,9,O,L,Period,Fn
+F10,0,P,Semicolon,Slash,Ctrl
+F11,Minus,BracketOpen,Apostrophe,NAN,NAN
+F12,Equal,BracketClose,NAN,NAN,NAN
+PrtSc,Bksp,Backslash,Enter,Shift,Left
+Pause,NAN,NAN,NAN,Up,Down
+Del,Home,End,PgUp,PgDn,Right
