@@ -9,6 +9,7 @@
 #include "keyboard_configurator/static_color_preset.hpp"
 #include "keyboard_configurator/star_matrix_preset.hpp"
 #include "keyboard_configurator/key_map_preset.hpp"
+#include "keyboard_configurator/hyprland_watcher.hpp"
 
 using kb::cfg::ConfigLoader;
 using kb::cfg::ConfiguratorCLI;
@@ -20,6 +21,7 @@ using kb::cfg::RuntimeConfig;
 using kb::cfg::StaticColorPreset;
 using kb::cfg::StarMatrixPreset;
 using kb::cfg::KeyMapPreset;
+using kb::cfg::HyprlandWatcher;
 
 namespace {
 
@@ -62,6 +64,13 @@ int main(int argc, char** argv) {
                             engine,
                             std::move(runtime.preset_parameters),
                             runtime.frame_interval);
+
+        std::unique_ptr<HyprlandWatcher> hypr;
+        if (runtime.hypr && runtime.hypr->enabled) {
+            hypr = std::make_unique<HyprlandWatcher>(*runtime.hypr, cli, engine.presetCount());
+            hypr->start();
+        }
+
         cli.run();
 
         return 0;

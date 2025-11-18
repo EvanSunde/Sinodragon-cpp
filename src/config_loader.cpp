@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -140,6 +141,17 @@ bool parseBool(const std::string& value) {
     return !v.empty();
 }
 
+std::vector<std::size_t> parseIndexList(const std::string& value) {
+    std::vector<std::size_t> out;
+    for (const auto& tok : parseList(value)) {
+        try {
+            out.push_back(static_cast<std::size_t>(parseNumber(tok)));
+        } catch (...) {
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 ConfigLoader::ConfigLoader(const PresetRegistry& registry)
@@ -161,6 +173,7 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     std::filesystem::path layout_path;
     std::string transport_id;
     std::vector<PresetSpec> preset_specs;
+    std::map<std::size_t, PresetSpec> presets_by_index;
     std::uint32_t frame_interval_ms = 33;
     std::optional<std::uint16_t> interface_usage_page;
     std::optional<std::uint16_t> interface_usage;
@@ -171,12 +184,39 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     std::unordered_map<std::size_t, std::vector<std::string>> preset_zone_names;
     std::unordered_map<std::size_t, bool> preset_enabled_overrides;
 
+    // Hyprland config
+    bool hypr_enabled = false;
+    std::string hypr_events_socket;
+    std::vector<std::size_t> hypr_default_enabled;
+    std::unordered_map<std::string, std::vector<std::size_t>> hypr_class_map;
+    // Section-driven profiles
+    std::string current_section;
+    std::string current_profile;
+    std::string default_profile_name;
+    std::unordered_map<std::string, std::string> class_to_profile_temp;
+    std::unordered_map<std::string, std::unordered_map<std::size_t, bool>> profile_enabled_raw;
+    std::unordered_map<std::string, std::unordered_map<std::size_t, std::vector<std::string>>> profile_keys_raw;
+    std::unordered_map<std::string, std::unordered_map<std::size_t, std::vector<std::string>>> profile_zones_raw;
+
     std::string line;
     std::size_t line_number = 0;
     while (std::getline(in, line)) {
         ++line_number;
         line = trim(line);
         if (line.empty() || line[0] == '#') {
+            continue;
+        }
+
+        // Section header handling: [Section] or [Profile:Name]
+        if (line.front() == '[' && line.back() == ']') {
+            std::string sect = trim(line.substr(1, line.size() - 2));
+            current_section.clear();
+            current_profile.clear();
+            if (sect.rfind("Profile:", 0) == 0) {
+                current_profile = trim(sect.substr(std::string("Profile:").size()));
+            } else {
+                current_section = sect;
+            }
             continue;
         }
 
@@ -209,12 +249,81 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
             continue;
         }
 
-        auto eq_pos = line.find('=');
-        if (eq_pos == std::string::npos) {
-            throw std::runtime_error("Invalid line in config: " + std::to_string(line_number));
+        // Support '=', ':' and '(...)' assignment forms
+        std::string key;
+        std::string value;
+        std::size_t sep_pos = line.find('=');
+        if (sep_pos == std::string::npos) {
+            sep_pos = line.find(':');
         }
-        std::string key = trim(line.substr(0, eq_pos));
-        std::string value = trim(line.substr(eq_pos + 1));
+        if (sep_pos != std::string::npos) {
+            key = trim(line.substr(0, sep_pos));
+            value = trim(line.substr(sep_pos + 1));
+        } else {
+            auto lp = line.find('(');
+            auto rp = line.rfind(')');
+            if (lp != std::string::npos && rp != std::string::npos && rp > lp) {
+                key = trim(line.substr(0, lp));
+                value = trim(line.substr(lp + 1, rp - lp - 1));
+            } else {
+                throw std::runtime_error("Invalid line in config: " + std::to_string(line_number));
+            }
+        }
+
+        // [Presets] explicit index form: preset.<index> = <id> [k=v...]
+        if (current_section == "Presets") {
+            if (key.rfind("preset.", 0) == 0) {
+                auto idxstr = key.substr(std::string("preset.").size());
+                if (idxstr.find('.') == std::string::npos) {
+                    std::size_t pindex = static_cast<std::size_t>(parseNumber(idxstr));
+                    std::istringstream iss(value);
+                    PresetSpec spec;
+                    if (!(iss >> spec.id)) {
+                        throw std::runtime_error("Missing preset identifier on line " + std::to_string(line_number));
+                    }
+                    std::string token;
+                    while (iss >> token) {
+                        auto eq = token.find('=');
+                        if (eq == std::string::npos) {
+                            throw std::runtime_error("Invalid preset parameter on line " + std::to_string(line_number));
+                        }
+                        auto pkey = token.substr(0, eq);
+                        auto pval = token.substr(eq + 1);
+                        spec.params.emplace(std::move(pkey), std::move(pval));
+                    }
+                    presets_by_index[pindex] = std::move(spec);
+                    continue;
+                }
+            }
+        }
+
+        // [ApplicationProfiles] mapping
+        if (current_section == "ApplicationProfiles") {
+            auto lower = key;
+            for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            auto strip_quotes = [](const std::string& s) {
+                if (s.size() >= 2 && ((s.front()=='"' && s.back()=='"') || (s.front()=='\'' && s.back()=='\''))) {
+                    return trim(s.substr(1, s.size()-2));
+                }
+                return trim(s);
+            };
+            auto parse_profile = [&](const std::string& val) {
+                std::string v = trim(val);
+                if (v.rfind("Profile:", 0) == 0) return trim(v.substr(std::string("Profile:").size()));
+                return v;
+            };
+            // Save mapping class->profile
+            std::string klass = strip_quotes(key);
+            std::string profname = parse_profile(value);
+            hypr_enabled = true;
+            if (lower == "default") {
+                default_profile_name = profname;
+                continue;
+            } else {
+                class_to_profile_temp[klass] = profname;
+                continue;
+            }
+        }
 
         if (key == "keyboard.name") {
             keyboard_name = value;
@@ -240,6 +349,18 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
             // zone.<name> = key1,key2,...
             std::string zone_name = key.substr(std::string("zone.").size());
             zones[zone_name] = parseList(value);
+        } else if (key == "hypr.enabled" || key == "hypr.enable") {
+            hypr_enabled = parseBool(value);
+        } else if (key == "hypr.events_socket") {
+            hypr_events_socket = value;
+        } else if (key == "hypr.default") {
+            hypr_default_enabled = parseIndexList(value);
+        } else if (key.rfind("hypr.map.", 0) == 0) {
+            // hypr.map.<class> = 0,2,3
+            std::string app = key.substr(std::string("hypr.map.").size());
+            if (!app.empty()) {
+                hypr_class_map[app] = parseIndexList(value);
+            }
         } else if (key.rfind("preset.", 0) == 0) {
             // preset.<index>.<field>
             auto rest = key.substr(std::string("preset.").size());
@@ -250,14 +371,26 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
             auto index_str = trim(rest.substr(0, dot));
             auto field = trim(rest.substr(dot + 1));
             std::size_t pindex = static_cast<std::size_t>(parseNumber(index_str));
-            if (field == "keys") {
-                preset_keys[pindex] = parseList(value);
-            } else if (field == "zones") {
-                preset_zone_names[pindex] = parseList(value);
-            } else if (field == "enabled") {
-                preset_enabled_overrides[pindex] = parseBool(value);
+            if (!current_profile.empty()) {
+                if (field == "keys") {
+                    profile_keys_raw[current_profile][pindex] = parseList(value);
+                } else if (field == "zones") {
+                    profile_zones_raw[current_profile][pindex] = parseList(value);
+                } else if (field == "enabled") {
+                    profile_enabled_raw[current_profile][pindex] = parseBool(value);
+                } else {
+                    throw std::runtime_error("Unknown configuration key: " + key);
+                }
             } else {
-                throw std::runtime_error("Unknown configuration key: " + key);
+                if (field == "keys") {
+                    preset_keys[pindex] = parseList(value);
+                } else if (field == "zones") {
+                    preset_zone_names[pindex] = parseList(value);
+                } else if (field == "enabled") {
+                    preset_enabled_overrides[pindex] = parseBool(value);
+                } else {
+                    throw std::runtime_error("Unknown configuration key: " + key);
+                }
             }
         } else {
             throw std::runtime_error("Unknown configuration key: " + key);
@@ -312,11 +445,21 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         throw std::runtime_error("Transport creation failed");
     }
 
-    for (auto& spec : preset_specs) {
-        auto preset = registry_.create(spec.id);
-        preset->configure(spec.params);
-        runtime_config.presets.push_back(std::move(preset));
-        runtime_config.preset_parameters.push_back(std::move(spec.params));
+    if (!presets_by_index.empty()) {
+        for (const auto& kv : presets_by_index) {
+            const auto& spec = kv.second;
+            auto preset = registry_.create(spec.id);
+            preset->configure(spec.params);
+            runtime_config.presets.push_back(std::move(preset));
+            runtime_config.preset_parameters.push_back(spec.params);
+        }
+    } else {
+        for (auto& spec : preset_specs) {
+            auto preset = registry_.create(spec.id);
+            preset->configure(spec.params);
+            runtime_config.presets.push_back(std::move(preset));
+            runtime_config.preset_parameters.push_back(std::move(spec.params));
+        }
     }
 
     if (runtime_config.presets.empty()) {
@@ -369,6 +512,72 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         if (kv.first < pc) {
             runtime_config.preset_enabled[kv.first] = kv.second;
         }
+    }
+
+    // Hypr config (legacy indices mapping preserved)
+    if (hypr_enabled) {
+        HyprConfig hcfg;
+        hcfg.enabled = true;
+        hcfg.events_socket = std::move(hypr_events_socket);
+        hcfg.default_enabled = std::move(hypr_default_enabled);
+        hcfg.class_map = std::move(hypr_class_map);
+        hcfg.default_profile = std::move(default_profile_name);
+        hcfg.class_to_profile = std::move(class_to_profile_temp);
+        // Compile profile-based mappings if any
+        // Build from profile_*_raw maps
+        const auto pc2 = runtime_config.presets.size();
+        // Gather profile names
+        std::unordered_map<std::string, bool> profile_names;
+        for (const auto& kv : profile_enabled_raw) profile_names[kv.first] = true;
+        for (const auto& kv : profile_keys_raw) profile_names[kv.first] = true;
+        for (const auto& kv : profile_zones_raw) profile_names[kv.first] = true;
+        if (!hcfg.default_profile.empty()) profile_names[hcfg.default_profile] = true;
+        for (const auto& kv : hcfg.class_to_profile) profile_names[kv.second] = true;
+        for (const auto& it : profile_names) {
+            const std::string& pname = it.first;
+            // start with global masks as defaults
+            std::vector<std::vector<bool>> masks = runtime_config.preset_masks;
+            // enabled default: all false
+            std::vector<bool> pen(pc2, false);
+            // apply per-preset keys
+            if (auto it2 = profile_keys_raw.find(pname); it2 != profile_keys_raw.end()) {
+                for (const auto& kv2 : it2->second) {
+                    if (kv2.first < pc2) {
+                        auto& m = masks[kv2.first];
+                        std::fill(m.begin(), m.end(), false);
+                        for (const auto& label : kv2.second) {
+                            if (auto opt = runtime_config.model.indexForKey(label)) m[*opt] = true;
+                        }
+                    }
+                }
+            }
+            // apply per-preset zones
+            if (auto it3 = profile_zones_raw.find(pname); it3 != profile_zones_raw.end()) {
+                for (const auto& kv3 : it3->second) {
+                    if (kv3.first < pc2) {
+                        auto& m = masks[kv3.first];
+                        std::fill(m.begin(), m.end(), false);
+                        for (const auto& zname : kv3.second) {
+                            auto zit = zones.find(zname);
+                            if (zit != zones.end()) {
+                                for (const auto& label : zit->second) {
+                                    if (auto opt = runtime_config.model.indexForKey(label)) m[*opt] = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // enabled overrides in profile
+            if (auto it4 = profile_enabled_raw.find(pname); it4 != profile_enabled_raw.end()) {
+                for (const auto& kv4 : it4->second) {
+                    if (kv4.first < pc2) pen[kv4.first] = kv4.second;
+                }
+            }
+            hcfg.profile_masks.emplace(pname, std::move(masks));
+            hcfg.profile_enabled.emplace(pname, std::move(pen));
+        }
+        runtime_config.hypr = std::move(hcfg);
     }
 
     return runtime_config;

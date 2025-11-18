@@ -27,6 +27,7 @@ add_library(keyboard_configurator STATIC
     src/effect_engine.cpp
     src/config_loader.cpp
     src/configurator_cli.cpp
+    src/hyprland_watcher.cpp
     src/logging_transport.cpp
     src/hidapi_transport.cpp
 )

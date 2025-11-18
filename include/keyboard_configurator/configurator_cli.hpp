@@ -23,6 +23,12 @@ public:
     ~ConfiguratorCLI();
 
     void run();
+    
+    // Thread-safe control from external integrations (e.g., Hyprland watcher)
+    void applyPresetEnable(std::size_t index, bool enabled);
+    void applyPresetEnableSet(const std::vector<bool>& enabled);
+    void applyPresetMasks(const std::vector<std::vector<bool>>& masks);
+    void refreshRender();
 
 private:
     const KeyboardModel& model_;

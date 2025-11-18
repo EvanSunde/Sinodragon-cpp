@@ -30,6 +30,9 @@ public:
     [[nodiscard]] bool presetEnabled(std::size_t index) const;
     [[nodiscard]] bool hasAnimatedEnabled() const;
 
+    void setPresetMask(std::size_t index, const std::vector<bool>& mask);
+    void setPresetMasks(const std::vector<std::vector<bool>>& masks, bool overlay_replace = true);
+
 private:
     const KeyboardModel& model_;
     DeviceTransport& transport_;

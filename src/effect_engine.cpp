@@ -129,4 +129,29 @@ bool EffectEngine::hasAnimatedEnabled() const {
     return false;
 }
 
+void EffectEngine::setPresetMask(std::size_t index, const std::vector<bool>& mask) {
+    if (index >= preset_masks_.size()) {
+        throw std::out_of_range("EffectEngine::setPresetMask index out of range");
+    }
+    const auto kc = model_.keyCount();
+    if (mask.size() != kc) {
+        throw std::invalid_argument("EffectEngine::setPresetMask mask size mismatch");
+    }
+    preset_masks_[index] = mask;
+}
+
+void EffectEngine::setPresetMasks(const std::vector<std::vector<bool>>& masks, bool overlay_replace) {
+    (void)overlay_replace; // reserved for future blending semantics
+    const auto pc = presets_.size();
+    if (masks.size() != pc) {
+        return; // ignore mismatched sets
+    }
+    const auto kc = model_.keyCount();
+    for (std::size_t i = 0; i < pc; ++i) {
+        if (masks[i].size() == kc) {
+            preset_masks_[i] = masks[i];
+        }
+    }
+}
+
 }  // namespace kb::cfg

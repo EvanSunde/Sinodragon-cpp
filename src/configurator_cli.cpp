@@ -221,4 +221,30 @@ void ConfiguratorCLI::run() {
     std::cout << "Exiting configurator" << '\n';
 }
 
+void ConfiguratorCLI::applyPresetEnable(std::size_t index, bool enabled) {
+    std::lock_guard<std::mutex> guard(engine_mutex_);
+    if (index < engine_.presetCount()) {
+        engine_.setPresetEnabled(index, enabled);
+    }
+}
+
+void ConfiguratorCLI::applyPresetEnableSet(const std::vector<bool>& enabled) {
+    std::lock_guard<std::mutex> guard(engine_mutex_);
+    const auto count = engine_.presetCount();
+    for (std::size_t i = 0; i < count && i < enabled.size(); ++i) {
+        engine_.setPresetEnabled(i, enabled[i]);
+    }
+}
+
+void ConfiguratorCLI::applyPresetMasks(const std::vector<std::vector<bool>>& masks) {
+    std::lock_guard<std::mutex> guard(engine_mutex_);
+    engine_.setPresetMasks(masks, true);
+}
+
+void ConfiguratorCLI::refreshRender() {
+    syncRenderState(true);
+}
+
 }  // namespace kb::cfg
+
+
