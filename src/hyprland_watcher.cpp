@@ -11,6 +11,7 @@
 
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include "keyboard_configurator/configurator_cli.hpp"
@@ -80,12 +81,24 @@ void HyprlandWatcher::runLoop(std::string socket_path) {
             continue;
         }
 
+        // Make reads time out so we can react to stop_
+        {
+            timeval tv{};
+            tv.tv_sec = 0;
+            tv.tv_usec = 200 * 1000; // 200ms
+            ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        }
+
         std::string buf;
         buf.reserve(4096);
         char tmp[1024];
         while (!stop_.load()) {
             ssize_t n = ::read(fd, tmp, sizeof(tmp));
             if (n <= 0) {
+                if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                    if (stop_.load()) break;
+                    continue;
+                }
                 break; // reconnect
             }
             buf.append(tmp, tmp + n);
@@ -115,6 +128,7 @@ void HyprlandWatcher::runLoop(std::string socket_path) {
                         continue; // no change
                     }
                     last_class_ = appClass;
+                    if (on_class_) { on_class_(last_class_); }
                     // Prefer profile-based mapping when available
                     if (!cfg_.profile_enabled.empty()) {
                         std::string prof;

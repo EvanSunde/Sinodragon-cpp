@@ -28,6 +28,8 @@ public:
     void applyPresetEnable(std::size_t index, bool enabled);
     void applyPresetEnableSet(const std::vector<bool>& enabled);
     void applyPresetMasks(const std::vector<std::vector<bool>>& masks);
+    void applyPresetMask(std::size_t index, const std::vector<bool>& mask);
+    void applyPresetParameter(std::size_t index, const std::string& key, const std::string& value);
     void refreshRender();
 
 private:

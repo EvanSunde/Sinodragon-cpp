@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -19,6 +20,7 @@ public:
 
     void start();
     void stop();
+    void setActiveClassCallback(std::function<void(const std::string&)> cb) { on_class_ = std::move(cb); }
 
 private:
     HyprConfig cfg_;
@@ -27,6 +29,7 @@ private:
     std::atomic<bool> stop_{false};
     std::thread thread_;
     std::string last_class_;
+    std::function<void(const std::string&)> on_class_;
 
     static std::string autoDetectEventsSocket();
     void runLoop(std::string socket_path);

@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.16)
 project(keyboard_configurator LANGUAGES CXX)
 
 find_package(hidapi REQUIRED)
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(LIBEVDEV REQUIRED IMPORTED_TARGET libevdev)
+endif()
 
 set(HIDAPI_TARGET "")
 if(TARGET hidapi::hidapi)
@@ -28,6 +32,7 @@ add_library(keyboard_configurator STATIC
     src/config_loader.cpp
     src/configurator_cli.cpp
     src/hyprland_watcher.cpp
+    src/shortcut_watcher.cpp
     src/logging_transport.cpp
     src/hidapi_transport.cpp
 )
@@ -40,7 +45,18 @@ target_include_directories(keyboard_configurator
 target_link_libraries(keyboard_configurator
     PUBLIC
         ${HIDAPI_TARGET}
+        $<IF:$<TARGET_EXISTS:PkgConfig::LIBEVDEV>,PkgConfig::LIBEVDEV,>
 )
+
+# Fallback if pkg-config is not available
+if(NOT TARGET PkgConfig::LIBEVDEV)
+    find_library(LIBEVDEV_LIB NAMES libevdev)
+    if(LIBEVDEV_LIB)
+        target_link_libraries(keyboard_configurator PUBLIC ${LIBEVDEV_LIB})
+    else()
+        message(FATAL_ERROR "libevdev not found. Please install libevdev or provide pkg-config libevdev.")
+    endif()
+endif()
 
 add_executable(kb_configurator src/main.cpp)
 

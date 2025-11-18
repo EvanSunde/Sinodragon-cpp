@@ -10,6 +10,7 @@
 #include "keyboard_configurator/star_matrix_preset.hpp"
 #include "keyboard_configurator/key_map_preset.hpp"
 #include "keyboard_configurator/hyprland_watcher.hpp"
+#include "keyboard_configurator/shortcut_watcher.hpp"
 
 using kb::cfg::ConfigLoader;
 using kb::cfg::ConfiguratorCLI;
@@ -65,9 +66,20 @@ int main(int argc, char** argv) {
                             std::move(runtime.preset_parameters),
                             runtime.frame_interval);
 
+        std::unique_ptr<ShortcutWatcher> shortcuts;
         std::unique_ptr<HyprlandWatcher> hypr;
         if (runtime.hypr && runtime.hypr->enabled) {
+            // Start shortcut watcher first so hypr callback can safely reference it
+            if (runtime.hypr->shortcuts_overlay_preset_index >= 0) {
+                shortcuts = std::make_unique<ShortcutWatcher>(runtime.model, cli, *runtime.hypr, runtime.model.keyCount());
+                shortcuts->start();
+            }
             hypr = std::make_unique<HyprlandWatcher>(*runtime.hypr, cli, engine.presetCount());
+            if (shortcuts) {
+                hypr->setActiveClassCallback([sw = shortcuts.get()](const std::string& klass){
+                    sw->setActiveClass(klass);
+                });
+            }
             hypr->start();
         }
 

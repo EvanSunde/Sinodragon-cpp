@@ -189,8 +189,14 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     // Section-driven profiles
     std::string current_section;
     std::string current_profile;
+    std::string current_shortcuts;
     std::string default_profile_name;
     std::unordered_map<std::string, std::string> class_to_profile_temp;
+    // Shortcuts temp storage
+    int shortcuts_overlay_index = -1;
+    std::string default_shortcut_name;
+    std::unordered_map<std::string, std::string> class_to_shortcut_temp;
+    std::unordered_map<std::string, ShortcutProfileConfig> shortcuts_temp;
     std::unordered_map<std::string, std::unordered_map<std::size_t, bool>> profile_enabled_raw;
     std::unordered_map<std::string, std::unordered_map<std::size_t, std::vector<std::string>>> profile_keys_raw;
     std::unordered_map<std::string, std::unordered_map<std::size_t, std::vector<std::string>>> profile_zones_raw;
@@ -204,13 +210,16 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
             continue;
         }
 
-        // Section header handling: [Section] or [Profile:Name]
+        // Section header handling: [Section], [Profile:Name], [Shortcuts:Name]
         if (line.front() == '[' && line.back() == ']') {
             std::string sect = trim(line.substr(1, line.size() - 2));
             current_section.clear();
             current_profile.clear();
+            current_shortcuts.clear();
             if (sect.rfind("Profile:", 0) == 0) {
                 current_profile = trim(sect.substr(std::string("Profile:").size()));
+            } else if (sect.rfind("Shortcuts:", 0) == 0) {
+                current_shortcuts = trim(sect.substr(std::string("Shortcuts:").size()));
             } else {
                 current_section = sect;
             }
@@ -277,20 +286,40 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
                 }
                 return trim(s);
             };
-            auto parse_profile = [&](const std::string& val) {
-                std::string v = trim(val);
-                if (v.rfind("Profile:", 0) == 0) return trim(v.substr(std::string("Profile:").size()));
-                return v;
+            // RHS may contain comma-separated tokens, e.g. "Profile:Name, shortcut:Name"
+            auto parse_assignments = [&](const std::string& rhs, std::string& outProfile, std::string& outShortcut) {
+                std::string v = rhs;
+                // split by commas
+                std::vector<std::string> parts;
+                std::string tmp;
+                std::istringstream pss(v);
+                while (std::getline(pss, tmp, ',')) {
+                    tmp = trim(tmp);
+                    if (!tmp.empty()) parts.push_back(tmp);
+                }
+                if (parts.empty()) parts.push_back(v);
+                for (const auto& p : parts) {
+                    if (p.rfind("Profile:", 0) == 0) {
+                        outProfile = trim(p.substr(std::string("Profile:").size()));
+                    } else if (p.rfind("shortcut:", 0) == 0 || p.rfind("Shortcut:", 0) == 0) {
+                        std::size_t off = (p[0] == 's' || p[0] == 'S') ? std::string("shortcut:").size() : std::string("Shortcut:").size();
+                        outShortcut = trim(p.substr(off));
+                    }
+                }
             };
-            // Save mapping class->profile
+            // Save mapping class->profile and optional shortcut
             std::string klass = strip_quotes(key);
-            std::string profname = parse_profile(value);
+            std::string profname;
+            std::string shortcutname;
+            parse_assignments(value, profname, shortcutname);
             hypr_enabled = true;
             if (lower == "default") {
-                default_profile_name = profname;
+                if (!profname.empty()) default_profile_name = profname;
+                if (!shortcutname.empty()) default_shortcut_name = shortcutname;
                 continue;
             } else {
-                class_to_profile_temp[klass] = profname;
+                if (!profname.empty()) class_to_profile_temp[klass] = profname;
+                if (!shortcutname.empty()) class_to_shortcut_temp[klass] = shortcutname;
                 continue;
             }
         }
@@ -352,6 +381,37 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
                     preset_enabled_overrides[pindex] = parseBool(value);
                 } else {
                     throw std::runtime_error("Unknown configuration key: " + key);
+                }
+            }
+        } else if (key == "shortcuts.overlay_preset_index") {
+            shortcuts_overlay_index = static_cast<int>(parseNumber(value));
+        } else if (!current_shortcuts.empty()) {
+            // Inside [Shortcuts:<Name>]
+            auto& scfg = shortcuts_temp[current_shortcuts];
+            if (key == "color") {
+                scfg.color = value;
+            } else {
+                // key like ctrl, ctrl_shift, alt, super, alt_shift, etc.
+                auto parse_mods = [](const std::string& s) -> int {
+                    int mask = 0;
+                    std::string token;
+                    std::istringstream iss(s);
+                    while (std::getline(iss, token, '_')) {
+                        std::string t;
+                        t.reserve(token.size());
+                        for (char c : token) t.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+                        if (t == "ctrl" || t == "control") mask |= 1;
+                        else if (t == "shift") mask |= 2;
+                        else if (t == "alt") mask |= 4;
+                        else if (t == "super" || t == "win" || t == "meta" || t == "windows") mask |= 8;
+                    }
+                    return mask;
+                };
+                int m = parse_mods(key);
+                if (m > 0) {
+                    scfg.combos[m] = parseList(value);
+                } else {
+                    throw std::runtime_error("Unknown shortcuts key: " + key);
                 }
             }
         } else {
@@ -476,6 +536,11 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         hcfg.events_socket = std::move(hypr_events_socket);
         hcfg.default_profile = std::move(default_profile_name);
         hcfg.class_to_profile = std::move(class_to_profile_temp);
+        // Shortcuts
+        hcfg.shortcuts_overlay_preset_index = shortcuts_overlay_index;
+        hcfg.default_shortcut = std::move(default_shortcut_name);
+        hcfg.class_to_shortcut = std::move(class_to_shortcut_temp);
+        hcfg.shortcuts = std::move(shortcuts_temp);
         // Compile profile-based mappings if any
         // Build from profile_*_raw maps
         const auto pc2 = runtime_config.presets.size();

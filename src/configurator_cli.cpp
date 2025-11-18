@@ -245,6 +245,24 @@ void ConfiguratorCLI::refreshRender() {
     syncRenderState(true);
 }
 
+void ConfiguratorCLI::applyPresetMask(std::size_t index, const std::vector<bool>& mask) {
+    std::lock_guard<std::mutex> guard(engine_mutex_);
+    if (index < engine_.presetCount()) {
+        engine_.setPresetMask(index, mask);
+    }
+}
+
+void ConfiguratorCLI::applyPresetParameter(std::size_t index, const std::string& key, const std::string& value) {
+    std::lock_guard<std::mutex> guard(engine_mutex_);
+    if (index >= engine_.presetCount()) return;
+    if (index >= preset_parameters_.size()) {
+        preset_parameters_.resize(engine_.presetCount());
+    }
+    preset_parameters_[index][key] = value;
+    auto& preset = engine_.presetAt(index);
+    preset.configure(preset_parameters_[index]);
+}
+
 }  // namespace kb::cfg
 
 
