@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <iostream>
 #include <cerrno>
+#include <algorithm>
 
 #include <libevdev/libevdev.h>
 
@@ -181,11 +182,11 @@ void ShortcutWatcher::updateActiveShortcutFromClass() {
 
 void ShortcutWatcher::applyMaskForMods(int modmask) {
     if (overlay_index_ < 0) return;
+    // Build mask for current mods
     std::vector<bool> mask(key_count_, false);
     if (!active_shortcut_name_.empty()) {
         auto it = compiled_.find(active_shortcut_name_);
         if (it != compiled_.end()) {
-            // Match exact modmask; also support fallback where specific combos may be defined
             auto jt = it->second.combos.find(modmask);
             if (jt != it->second.combos.end()) {
                 for (auto idx : jt->second) {
@@ -194,8 +195,40 @@ void ShortcutWatcher::applyMaskForMods(int modmask) {
             }
         }
     }
-    cli_.applyPresetMask(static_cast<std::size_t>(overlay_index_), mask);
-    cli_.refreshRender();
+
+    const bool has_any = std::any_of(mask.begin(), mask.end(), [](bool b){ return b; });
+
+    if (modmask != 0 && has_any) {
+        // Engage exclusive overlay mode: enable only overlay preset
+        if (!engaged_) {
+            saved_enabled_ = cli_.getPresetEnabledSet();
+            std::vector<bool> only_overlay = saved_enabled_;
+            if (only_overlay.empty()) {
+                // Query again in case
+                only_overlay = cli_.getPresetEnabledSet();
+            }
+        
+            only_overlay.assign(only_overlay.size(), false);
+            if (overlay_index_ >= 0 && static_cast<std::size_t>(overlay_index_) < only_overlay.size()) {
+                only_overlay[static_cast<std::size_t>(overlay_index_)] = true;
+            }
+            cli_.applyPresetEnableSet(only_overlay);
+            engaged_ = true;
+        }
+        cli_.applyPresetMask(static_cast<std::size_t>(overlay_index_), mask);
+        cli_.refreshRender();
+    } else {
+        // Disengage: clear mask and restore enabled set
+        cli_.applyPresetMask(static_cast<std::size_t>(overlay_index_), std::vector<bool>(key_count_, false));
+        if (engaged_) {
+            if (!saved_enabled_.empty()) {
+                cli_.applyPresetEnableSet(saved_enabled_);
+            }
+            engaged_ = false;
+            saved_enabled_.clear();
+        }
+        cli_.refreshRender();
+    }
 }
 
 } // namespace kb::cfg

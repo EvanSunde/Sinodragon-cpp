@@ -263,6 +263,16 @@ void ConfiguratorCLI::applyPresetParameter(std::size_t index, const std::string&
     preset.configure(preset_parameters_[index]);
 }
 
+std::vector<bool> ConfiguratorCLI::getPresetEnabledSet() const {
+    std::lock_guard<std::mutex> guard(engine_mutex_);
+    const auto count = engine_.presetCount();
+    std::vector<bool> out(count, false);
+    for (std::size_t i = 0; i < count; ++i) {
+        out[i] = engine_.presetEnabled(i);
+    }
+    return out;
+}
+
 }  // namespace kb::cfg
 
 

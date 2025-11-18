@@ -53,6 +53,8 @@ private:
 
     // current modifier state bits: 1=CTRL,2=SHIFT,4=ALT,8=SUPER
     std::atomic<int> mods_{0};
+    bool engaged_{false};
+    std::vector<bool> saved_enabled_;
 
     // device handles
     struct DevHandle {

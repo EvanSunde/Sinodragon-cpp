@@ -32,6 +32,8 @@ public:
     void applyPresetParameter(std::size_t index, const std::string& key, const std::string& value);
     void refreshRender();
 
+    std::vector<bool> getPresetEnabledSet() const;
+
 private:
     const KeyboardModel& model_;
     EffectEngine& engine_;
