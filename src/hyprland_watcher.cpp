@@ -141,20 +141,7 @@ void HyprlandWatcher::runLoop(std::string socket_path) {
                         }
                     }
 
-                    // Fallback: class->indices mapping
-                    std::vector<bool> enabled(preset_count_, false);
-                    auto it = cfg_.class_map.find(appClass);
-                    const std::vector<std::size_t>* list = nullptr;
-                    if (it != cfg_.class_map.end()) {
-                        list = &it->second;
-                    } else {
-                        list = &cfg_.default_enabled;
-                    }
-                    for (std::size_t idx : *list) {
-                        if (idx < enabled.size()) enabled[idx] = true;
-                    }
-                    cli_.applyPresetEnableSet(enabled);
-                    cli_.refreshRender();
+                    // No profile data available; skip applying changes.
                 }
             }
         }

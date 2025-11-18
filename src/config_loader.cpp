@@ -172,7 +172,6 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     std::size_t packet_length = 0;
     std::filesystem::path layout_path;
     std::string transport_id;
-    std::vector<PresetSpec> preset_specs;
     std::map<std::size_t, PresetSpec> presets_by_index;
     std::uint32_t frame_interval_ms = 33;
     std::optional<std::uint16_t> interface_usage_page;
@@ -187,8 +186,6 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     // Hyprland config
     bool hypr_enabled = false;
     std::string hypr_events_socket;
-    std::vector<std::size_t> hypr_default_enabled;
-    std::unordered_map<std::string, std::vector<std::size_t>> hypr_class_map;
     // Section-driven profiles
     std::string current_section;
     std::string current_profile;
@@ -220,34 +217,7 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
             continue;
         }
 
-        // Only treat lines starting with 'preset' followed by whitespace or '=' as preset declarations.
-        if (line.rfind("preset", 0) == 0 && (line.size() == 6 || std::isspace(static_cast<unsigned char>(line[6])) || line[6] == '=')) {
-            std::string remainder = line.substr(std::string("preset").size());
-            remainder = trim(remainder);
-            if (remainder.empty() || remainder[0] != '=') {
-                throw std::runtime_error("Invalid preset declaration on line " + std::to_string(line_number));
-            }
-            remainder.erase(0, 1);  // remove '='
-            remainder = trim(remainder);
-
-            std::istringstream iss(remainder);
-            PresetSpec spec;
-            if (!(iss >> spec.id)) {
-                throw std::runtime_error("Missing preset identifier on line " + std::to_string(line_number));
-            }
-            std::string token;
-            while (iss >> token) {
-                auto eq = token.find('=');
-                if (eq == std::string::npos) {
-                    throw std::runtime_error("Invalid preset parameter on line " + std::to_string(line_number));
-                }
-                auto key = token.substr(0, eq);
-                auto value = token.substr(eq + 1);
-                spec.params.emplace(std::move(key), std::move(value));
-            }
-            preset_specs.push_back(std::move(spec));
-            continue;
-        }
+        
 
         // Support '=', ':' and '(...)' assignment forms
         std::string key;
@@ -353,14 +323,6 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
             hypr_enabled = parseBool(value);
         } else if (key == "hypr.events_socket") {
             hypr_events_socket = value;
-        } else if (key == "hypr.default") {
-            hypr_default_enabled = parseIndexList(value);
-        } else if (key.rfind("hypr.map.", 0) == 0) {
-            // hypr.map.<class> = 0,2,3
-            std::string app = key.substr(std::string("hypr.map.").size());
-            if (!app.empty()) {
-                hypr_class_map[app] = parseIndexList(value);
-            }
         } else if (key.rfind("preset.", 0) == 0) {
             // preset.<index>.<field>
             auto rest = key.substr(std::string("preset.").size());
@@ -453,13 +415,6 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
             runtime_config.presets.push_back(std::move(preset));
             runtime_config.preset_parameters.push_back(spec.params);
         }
-    } else {
-        for (auto& spec : preset_specs) {
-            auto preset = registry_.create(spec.id);
-            preset->configure(spec.params);
-            runtime_config.presets.push_back(std::move(preset));
-            runtime_config.preset_parameters.push_back(std::move(spec.params));
-        }
     }
 
     if (runtime_config.presets.empty()) {
@@ -514,13 +469,11 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         }
     }
 
-    // Hypr config (legacy indices mapping preserved)
+    // Hypr config
     if (hypr_enabled) {
         HyprConfig hcfg;
         hcfg.enabled = true;
         hcfg.events_socket = std::move(hypr_events_socket);
-        hcfg.default_enabled = std::move(hypr_default_enabled);
-        hcfg.class_map = std::move(hypr_class_map);
         hcfg.default_profile = std::move(default_profile_name);
         hcfg.class_to_profile = std::move(class_to_profile_temp);
         // Compile profile-based mappings if any

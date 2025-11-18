@@ -16,9 +16,6 @@ namespace kb::cfg {
 struct HyprConfig {
     bool enabled{false};
     std::string events_socket; // optional; if empty, auto-detect
-    // Legacy simple mapping (kept for backward-compat)
-    std::vector<std::size_t> default_enabled;
-    std::unordered_map<std::string, std::vector<std::size_t>> class_map;
     // Profile-based mapping
     std::string default_profile; // e.g. "Default"
     std::unordered_map<std::string, std::string> class_to_profile; // class -> profile name
