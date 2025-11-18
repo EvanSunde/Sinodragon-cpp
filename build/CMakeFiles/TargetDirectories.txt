@@ -1,4 +1,0 @@
-/home/evan/github/sinodragoncpp/keyboard_configurator/build/CMakeFiles/keyboard_configurator.dir
-/home/evan/github/sinodragoncpp/keyboard_configurator/build/CMakeFiles/kb_configurator.dir
-/home/evan/github/sinodragoncpp/keyboard_configurator/build/CMakeFiles/edit_cache.dir
-/home/evan/github/sinodragoncpp/keyboard_configurator/build/CMakeFiles/rebuild_cache.dir

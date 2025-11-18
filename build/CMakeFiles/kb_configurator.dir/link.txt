@@ -1,1 +1,0 @@
-/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/kb_configurator.dir/link.d CMakeFiles/kb_configurator.dir/src/main.cpp.o -o kb_configurator  libkeyboard_configurator.a /usr/lib/libhidapi-hidraw.so.0.15.0
