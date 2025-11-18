@@ -6,6 +6,7 @@
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <cerrno>
 
 #include <libevdev/libevdev.h>
 
@@ -135,7 +136,6 @@ void ShortcutWatcher::runLoop() {
                 if (rc == 0) {
                     if (ev.type == EV_KEY) {
                         if (is_ctrl(ev.code)) {
-                            if (ev.value) d.fd /* reuse */ , d.dev; // no-op to silence warnings
                             if (ev.value) d.mask |= 1; else d.mask &= ~1;
                         } else if (is_shift(ev.code)) {
                             if (ev.value) d.mask |= 2; else d.mask &= ~2;

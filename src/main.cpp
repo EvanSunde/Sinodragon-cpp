@@ -23,6 +23,7 @@ using kb::cfg::StaticColorPreset;
 using kb::cfg::StarMatrixPreset;
 using kb::cfg::KeyMapPreset;
 using kb::cfg::HyprlandWatcher;
+using kb::cfg::ShortcutWatcher;
 
 namespace {
 
