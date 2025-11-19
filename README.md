@@ -10,6 +10,7 @@ Features:
 - Easy Zone-based control (Any number of and any kind of zone can be made)
 - In Hyprland, app based lighting can be controlled
 - Supports App specific shortcut lighting
+- CLI only App For Very Low Resource usages (0.1% CPU and 5 MB RAM)
 
 ## Modular configurator architecture
 
