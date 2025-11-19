@@ -184,16 +184,22 @@ void ShortcutWatcher::applyMaskForMods(int modmask) {
     if (overlay_index_ < 0) return;
     // Build mask for current mods
     std::vector<bool> mask(key_count_, false);
-    if (!active_shortcut_name_.empty()) {
-        auto it = compiled_.find(active_shortcut_name_);
-        if (it != compiled_.end()) {
-            auto jt = it->second.combos.find(modmask);
-            if (jt != it->second.combos.end()) {
-                for (auto idx : jt->second) {
-                    if (idx < mask.size()) mask[idx] = true;
-                }
-            }
+    std::string used_profile;
+    auto build_from = [&](const std::string& pname) -> bool {
+        if (pname.empty()) return false;
+        auto it = compiled_.find(pname);
+        if (it == compiled_.end()) return false;
+        auto jt = it->second.combos.find(modmask);
+        if (jt == it->second.combos.end()) return false;
+        for (auto idx : jt->second) {
+            if (idx < mask.size()) mask[idx] = true;
         }
+        used_profile = pname;
+        return true;
+    };
+    bool found = build_from(active_shortcut_name_);
+    if (!found && hypr_.default_shortcut != active_shortcut_name_) {
+        found = build_from(hypr_.default_shortcut);
     }
 
     const bool has_any = std::any_of(mask.begin(), mask.end(), [](bool b){ return b; });
@@ -214,6 +220,13 @@ void ShortcutWatcher::applyMaskForMods(int modmask) {
             }
             cli_.applyPresetEnableSet(only_overlay);
             engaged_ = true;
+        }
+        // Apply color from the used profile if present
+        if (!used_profile.empty()) {
+            auto sit = hypr_.shortcuts.find(used_profile);
+            if (sit != hypr_.shortcuts.end() && !sit->second.color.empty()) {
+                cli_.applyPresetParameter(static_cast<std::size_t>(overlay_index_), "color", sit->second.color);
+            }
         }
         cli_.applyPresetMask(static_cast<std::size_t>(overlay_index_), mask);
         cli_.refreshRender();
