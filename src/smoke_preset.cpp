@@ -1,0 +1,159 @@
+#include "keyboard_configurator/smoke_preset.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <cctype>
+#include <vector>
+
+namespace kb::cfg {
+
+namespace {
+RgbColor parseHexColor(const std::string& value) {
+    if (value.size() != 7 || value.front() != '#') {
+        return {255, 255, 255};
+    }
+    auto hexToComponent = [](char hi, char lo) -> std::uint8_t {
+        auto hexValue = [](char ch) -> int {
+            if (ch >= '0' && ch <= '9') return ch - '0';
+            char upper = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+            if (upper >= 'A' && upper <= 'F') return 10 + (upper - 'A');
+            return 0;
+        };
+        return static_cast<std::uint8_t>((hexValue(hi) << 4) | hexValue(lo));
+    };
+    return {
+        hexToComponent(value[1], value[2]),
+        hexToComponent(value[3], value[4]),
+        hexToComponent(value[5], value[6])
+    };
+}
+
+int fastfloor(double x) { return static_cast<int>(x >= 0 ? x : x - 1); }
+
+double lerp(double a, double b, double t) { return a + (b - a) * t; }
+
+double fade(double t) { return t*t*t*(t*(t*6-15)+10); }
+
+int p[512];
+bool p_init = false;
+int perm_table[256] = {
+    151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,
+    140,36,103,30,69,142,8,99,37,240,21,10,23,190, 6,148,
+    247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,
+    57,177,33,88,237,149,56,87,174,20,125,136,171,168, 68,175,
+    74,165,71,134,139,48,27,166,77,146,158,231,83,111,229,122,
+    60,211,133,230,220,105,92,41,55,46,245,40,244,102,143,54,
+    65,25,63,161, 1,216,80,73,209,76,132,187,208, 89,18,169,
+    200,196,135,130,116,188,159,86,164,100,109,198,173,186, 3,64,
+    52,217,226,250,124,123, 5,202,38,147,118,126,255,82,85,212,
+    207,206,59,227,47,16,58,17,182,189,28, 42,223,183,170,213,
+    119,248,152, 2,44,154,163, 70,221,153,101,155,167, 43,172,
+    9,129,22,39,253, 19,98,108,110,79,113,224,232,178,185, 112,
+    104,218,246,97,228,251,34,242,193,238,210,144,12,191,179,162,
+    241, 81, 51,145,235,249,14,239,107, 49,192,214, 31,181,199,
+    106,157,184, 84,204,176,115,121,50,45,127, 4,150,254,138,
+    236,205, 93,222,114, 67,29, 24, 72,243,141,128,195,78,66
+};
+
+void ensure_perm() {
+    if (p_init) return;
+    for (int i = 0; i < 256; ++i) p[i] = perm_table[i];
+    for (int i = 0; i < 256; ++i) p[256 + i] = p[i];
+    p_init = true;
+}
+
+inline double grad(int hash, double x, double y, double z) {
+    int h = hash & 15;
+    double u = h < 8 ? x : y;
+    double v = h < 4 ? y : (h == 12 || h == 14 ? x : z);
+    return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+}
+
+double perlin(double x, double y, double z) {
+    ensure_perm();
+    int X = fastfloor(x) & 255;
+    int Y = fastfloor(y) & 255;
+    int Z = fastfloor(z) & 255;
+    x -= fastfloor(x);
+    y -= fastfloor(y);
+    z -= fastfloor(z);
+    double u = fade(x);
+    double v = fade(y);
+    double w = fade(z);
+    int A = p[X] + Y, AA = p[A] + Z, AB = p[A + 1] + Z;
+    int B = p[X + 1] + Y, BA = p[B] + Z, BB = p[B + 1] + Z;
+    double res = lerp(
+        lerp(
+            lerp(grad(p[AA], x, y, z), grad(p[BA], x - 1, y, z), u),
+            lerp(grad(p[AB], x, y - 1, z), grad(p[BB], x - 1, y - 1, z), u), v),
+        lerp(
+            lerp(grad(p[AA + 1], x, y, z - 1), grad(p[BA + 1], x - 1, y, z - 1), u),
+            lerp(grad(p[AB + 1], x, y - 1, z - 1), grad(p[BB + 1], x - 1, y - 1, z - 1), u), v), w);
+    return (res + 1.0) * 0.5;
+}
+}
+
+std::string SmokePreset::id() const { return "smoke"; }
+
+void SmokePreset::configure(const ParameterMap& params) {
+    if (auto it = params.find("speed"); it != params.end()) speed_ = std::stod(it->second);
+    if (auto it = params.find("scale"); it != params.end()) scale_ = std::stod(it->second);
+    if (auto it = params.find("octaves"); it != params.end()) octaves_ = std::max(1, std::stoi(it->second));
+    if (auto it = params.find("persistence"); it != params.end()) persistence_ = std::stod(it->second);
+    if (auto it = params.find("lacunarity"); it != params.end()) lacunarity_ = std::stod(it->second);
+    if (auto it = params.find("color_low"); it != params.end()) color_low_ = parseHexColor(it->second);
+    if (auto it = params.find("color_high"); it != params.end()) color_high_ = parseHexColor(it->second);
+}
+
+void SmokePreset::buildCoords(const KeyboardModel& model) {
+    const auto& layout = model.layout();
+    std::size_t total = model.keyCount();
+    xs_.assign(total, 0.0);
+    ys_.assign(total, 0.0);
+    std::size_t idx = 0;
+    double rows = static_cast<double>(layout.size());
+    double max_cols = 1.0;
+    for (const auto& row : layout) max_cols = std::max<double>(max_cols, row.size());
+    for (std::size_t r = 0; r < layout.size(); ++r) {
+        const auto& row = layout[r];
+        for (std::size_t c = 0; c < row.size(); ++c) {
+            xs_[idx] = max_cols > 1.0 ? static_cast<double>(c) / (max_cols - 1.0) : 0.0;
+            ys_[idx] = rows > 1.0 ? static_cast<double>(r) / (rows - 1.0) : 0.0;
+            ++idx;
+        }
+    }
+    coords_built_ = true;
+}
+
+void SmokePreset::render(const KeyboardModel& model,
+                         double time_seconds,
+                         KeyColorFrame& frame) {
+    const auto total = model.keyCount();
+    if (frame.size() != total) frame.resize(total);
+    if (!coords_built_) buildCoords(model);
+
+    double t = time_seconds * speed_;
+    for (std::size_t i = 0; i < total; ++i) {
+        double x = xs_[i] * scale_;
+        double y = ys_[i] * scale_;
+        double amp = 1.0;
+        double freq = 1.0;
+        double sum = 0.0;
+        double norm = 0.0;
+        for (int o = 0; o < octaves_; ++o) {
+            sum += amp * perlin(x * freq, y * freq, t * freq);
+            norm += amp;
+            amp *= persistence_;
+            freq *= lacunarity_;
+        }
+        double v = norm > 0.0 ? sum / norm : 0.0;
+        v = std::clamp(v, 0.0, 1.0);
+        RgbColor c{};
+        c.r = static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(color_low_.r * (1.0 - v) + color_high_.r * v)), 0, 255));
+        c.g = static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(color_low_.g * (1.0 - v) + color_high_.g * v)), 0, 255));
+        c.b = static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(color_low_.b * (1.0 - v) + color_high_.b * v)), 0, 255));
+        frame.setColor(i, c);
+    }
+}
+
+}  // namespace kb::cfg

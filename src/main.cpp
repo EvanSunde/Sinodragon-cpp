@@ -9,6 +9,9 @@
 #include "keyboard_configurator/static_color_preset.hpp"
 #include "keyboard_configurator/star_matrix_preset.hpp"
 #include "keyboard_configurator/key_map_preset.hpp"
+#include "keyboard_configurator/liquid_plasma_preset.hpp"
+#include "keyboard_configurator/reaction_diffusion_preset.hpp"
+#include "keyboard_configurator/smoke_preset.hpp"
 #include "keyboard_configurator/hyprland_watcher.hpp"
 #include "keyboard_configurator/shortcut_watcher.hpp"
 
@@ -22,6 +25,9 @@ using kb::cfg::RuntimeConfig;
 using kb::cfg::StaticColorPreset;
 using kb::cfg::StarMatrixPreset;
 using kb::cfg::KeyMapPreset;
+using kb::cfg::LiquidPlasmaPreset;
+using kb::cfg::ReactionDiffusionPreset;
+using kb::cfg::SmokePreset;
 using kb::cfg::HyprlandWatcher;
 using kb::cfg::ShortcutWatcher;
 
@@ -33,6 +39,9 @@ PresetRegistry buildRegistry() {
     registry.registerPreset("rainbow_wave", [] { return std::make_unique<RainbowWavePreset>(); });
     registry.registerPreset("star_matrix", [] { return std::make_unique<StarMatrixPreset>(); });
     registry.registerPreset("key_map", [] { return std::make_unique<KeyMapPreset>(); });
+    registry.registerPreset("liquid_plasma", [] { return std::make_unique<LiquidPlasmaPreset>(); });
+    registry.registerPreset("reaction_diffusion", [] { return std::make_unique<ReactionDiffusionPreset>(); });
+    registry.registerPreset("smoke", [] { return std::make_unique<SmokePreset>(); });
     return registry;
 }
 

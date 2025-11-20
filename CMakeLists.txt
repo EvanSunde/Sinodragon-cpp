@@ -28,6 +28,9 @@ add_library(keyboard_configurator STATIC
     src/rainbow_wave_preset.cpp
     src/key_map_preset.cpp
     src/star_matrix_preset.cpp
+    src/liquid_plasma_preset.cpp
+    src/reaction_diffusion_preset.cpp
+    src/smoke_preset.cpp
     src/effect_engine.cpp
     src/config_loader.cpp
     src/configurator_cli.cpp
