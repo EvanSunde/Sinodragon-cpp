@@ -101,6 +101,9 @@ void SmokePreset::configure(const ParameterMap& params) {
     if (auto it = params.find("octaves"); it != params.end()) octaves_ = std::max(1, std::stoi(it->second));
     if (auto it = params.find("persistence"); it != params.end()) persistence_ = std::stod(it->second);
     if (auto it = params.find("lacunarity"); it != params.end()) lacunarity_ = std::stod(it->second);
+    if (auto it = params.find("drift_x"); it != params.end()) drift_x_ = std::stod(it->second);
+    if (auto it = params.find("drift_y"); it != params.end()) drift_y_ = std::stod(it->second);
+    if (auto it = params.find("contrast"); it != params.end()) contrast_ = std::max(0.0, std::stod(it->second));
     if (auto it = params.find("color_low"); it != params.end()) color_low_ = parseHexColor(it->second);
     if (auto it = params.find("color_high"); it != params.end()) color_high_ = parseHexColor(it->second);
 }
@@ -132,21 +135,25 @@ void SmokePreset::render(const KeyboardModel& model,
     if (frame.size() != total) frame.resize(total);
     if (!coords_built_) buildCoords(model);
 
-    double t = time_seconds * speed_;
+    double t_anim = time_seconds * speed_;
+    double offset_x = time_seconds * drift_x_;
+    double offset_y = time_seconds * drift_y_;
     for (std::size_t i = 0; i < total; ++i) {
-        double x = xs_[i] * scale_;
-        double y = ys_[i] * scale_;
+        double x = xs_[i] * scale_ + offset_x;
+        double y = ys_[i] * scale_ + offset_y;
         double amp = 1.0;
         double freq = 1.0;
         double sum = 0.0;
         double norm = 0.0;
         for (int o = 0; o < octaves_; ++o) {
-            sum += amp * perlin(x * freq, y * freq, t * freq);
+            sum += amp * perlin(x * freq, y * freq, t_anim * freq);
             norm += amp;
             amp *= persistence_;
             freq *= lacunarity_;
         }
         double v = norm > 0.0 ? sum / norm : 0.0;
+        // Apply contrast around 0.5 center
+        v = 0.5 + (v - 0.5) * contrast_;
         v = std::clamp(v, 0.0, 1.0);
         RgbColor c{};
         c.r = static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(color_low_.r * (1.0 - v) + color_high_.r * v)), 0, 255));

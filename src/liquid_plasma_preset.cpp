@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <string>
 
 namespace kb::cfg {
 
@@ -58,8 +59,38 @@ void LiquidPlasmaPreset::configure(const ParameterMap& params) {
     if (auto it = params.find("scale"); it != params.end()) scale_ = std::stod(it->second);
     if (auto it = params.find("saturation"); it != params.end()) saturation_ = std::stod(it->second);
     if (auto it = params.find("value"); it != params.end()) value_ = std::stod(it->second);
-    if (auto it = params.find("tint"); it != params.end()) { tint_ = parseHexColor(it->second); use_tint_ = true; }
-    if (auto it = params.find("tint_mix"); it != params.end()) { use_tint_ = true; tint_mix_ = std::clamp(std::stod(it->second), 0.0, 1.0); }
+    if (auto it = params.find("wave_complexity"); it != params.end()) {
+        try { wave_complexity_ = std::stoi(it->second); } catch (...) {}
+        if (wave_complexity_ < 1) wave_complexity_ = 1;
+        if (wave_complexity_ > 10) wave_complexity_ = 10;
+    }
+    if (auto it = params.find("mix_mode"); it != params.end()) {
+        std::string m = it->second; std::transform(m.begin(), m.end(), m.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+        if (m == "nearest") mix_mode_ = MixMode::Nearest; else mix_mode_ = MixMode::Linear;
+    }
+    if (auto it = params.find("colors"); it != params.end()) {
+        palette_.clear();
+        const std::string& s = it->second;
+        std::string token;
+        for (std::size_t i = 0; i <= s.size(); ++i) {
+            if (i == s.size() || s[i] == ',') {
+                // trim spaces
+                std::size_t a = 0, b = token.size();
+                while (a < b && std::isspace(static_cast<unsigned char>(token[a]))) ++a;
+                while (b > a && std::isspace(static_cast<unsigned char>(token[b-1]))) --b;
+                if (b > a) {
+                    std::string hex = token.substr(a, b - a);
+                    if (hex.size() == 7 && hex[0] == '#') {
+                        palette_.push_back(parseHexColor(hex));
+                        if (palette_.size() >= 10) break;
+                    }
+                }
+                token.clear();
+            } else {
+                token.push_back(s[i]);
+            }
+        }
+    }
 }
 
 void LiquidPlasmaPreset::buildCoords(const KeyboardModel& model) {
@@ -94,19 +125,43 @@ void LiquidPlasmaPreset::render(const KeyboardModel& model,
         double x = xs_[i] * scale_;
         double y = ys_[i] * scale_;
         double v = 0.0;
-        v += std::sin(3.0 * x + t);
-        v += std::sin(4.0 * (y + 0.25) + t * 1.37);
-        v += std::sin(5.0 * (x + y) + t * 0.73);
+        int terms = 0;
+        // Directional sine components based on wave_complexity_
+        for (int k = 0; k < wave_complexity_; ++k) {
+            double ax = static_cast<double>(2 + k);
+            double ay = static_cast<double>(3 + (k % 3));
+            v += std::sin(ax * x + t * (1.0 + 0.31 * k)); ++terms;
+            v += std::sin(ay * y + t * (0.73 + 0.17 * k)); ++terms;
+            if ((k % 2) == 0) { v += std::sin((ax + ay) * (x + y) + t * (0.53 + 0.11 * k)); ++terms; }
+        }
+        // One radial term
         double r2 = x * x + y * y;
-        v += std::sin(6.0 * std::sqrt(r2 + 1e-6) + t * 1.61);
-        v = (v + 4.0) * 0.125;
-        v = std::clamp(v, 0.0, 1.0);
-        double hue = 360.0 * v;
-        RgbColor c = hsvToRgb(hue, std::clamp(saturation_, 0.0, 1.0), std::clamp(value_, 0.0, 1.0));
-        if (use_tint_) {
-            c.r = mix8(c.r, tint_.r, tint_mix_);
-            c.g = mix8(c.g, tint_.g, tint_mix_);
-            c.b = mix8(c.b, tint_.b, tint_mix_);
+        v += std::sin((2.5 + 0.5 * wave_complexity_) * std::sqrt(r2 + 1e-6) + t * (1.0 + 0.21 * wave_complexity_));
+        ++terms;
+        // Normalize to [0,1]
+        double v01 = (v + static_cast<double>(terms)) / (2.0 * static_cast<double>(terms));
+        v01 = std::clamp(v01, 0.0, 1.0);
+
+        RgbColor c{};
+        if (!palette_.empty()) {
+            if (palette_.size() == 1 || mix_mode_ == MixMode::Nearest) {
+                std::size_t idx = static_cast<std::size_t>(std::lround(v01 * (palette_.size() - 1)));
+                if (idx >= palette_.size()) idx = palette_.size() - 1;
+                c = palette_[idx];
+            } else {
+                double pos = v01 * (palette_.size() - 1);
+                std::size_t i0 = static_cast<std::size_t>(std::floor(pos));
+                std::size_t i1 = std::min(i0 + 1, palette_.size() - 1);
+                double f = pos - static_cast<double>(i0);
+                const RgbColor& a = palette_[i0];
+                const RgbColor& b = palette_[i1];
+                c.r = mix8(a.r, b.r, f);
+                c.g = mix8(a.g, b.g, f);
+                c.b = mix8(a.b, b.b, f);
+            }
+        } else {
+            double hue = 360.0 * v01;
+            c = hsvToRgb(hue, std::clamp(saturation_, 0.0, 1.0), std::clamp(value_, 0.0, 1.0));
         }
         frame.setColor(i, c);
     }

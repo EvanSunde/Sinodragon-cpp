@@ -20,9 +20,10 @@ private:
     double scale_{2.5};
     double saturation_{0.9};
     double value_{1.0};
-    bool use_tint_{false};
-    double tint_mix_{0.35};
-    RgbColor tint_{};
+    int wave_complexity_{4}; // 1..10
+    enum class MixMode { Linear, Nearest };
+    MixMode mix_mode_{MixMode::Linear};
+    std::vector<RgbColor> palette_{}; // up to 10 colors
 
     bool coords_built_{false};
     std::vector<double> xs_;

@@ -21,6 +21,9 @@ private:
     int octaves_{4};
     double persistence_{0.5};
     double lacunarity_{2.0};
+    double drift_x_{0.0};
+    double drift_y_{0.0};
+    double contrast_{1.0};
     RgbColor color_low_{0, 0, 0};
     RgbColor color_high_{255, 180, 80};
 
