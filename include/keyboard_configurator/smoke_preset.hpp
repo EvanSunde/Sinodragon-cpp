@@ -14,8 +14,10 @@ public:
                 double time_seconds,
                 KeyColorFrame& frame) override;
     [[nodiscard]] bool isAnimated() const noexcept override { return true; }
+    void setKeyActivityProvider(KeyActivityProviderPtr provider) override { provider_ = std::move(provider); }
 
 private:
+    KeyActivityProviderPtr provider_;
     double speed_{0.2};
     double scale_{2.0};
     int octaves_{4};
@@ -27,10 +29,18 @@ private:
     RgbColor color_low_{0, 0, 0};
     RgbColor color_high_{255, 180, 80};
 
+    bool reactive_enabled_{false};
+    double reactive_history_{1.2};
+    double reactive_decay_{0.45};
+    double reactive_spread_{0.18};
+    double reactive_intensity_{1.0};
+    RgbColor reactive_color_{255, 255, 255};
+
     bool coords_built_{false};
     std::vector<double> xs_;
     std::vector<double> ys_;
     void buildCoords(const KeyboardModel& model);
+    void applyReactiveOverlay(KeyColorFrame& frame);
 };
 
 }  // namespace kb::cfg
