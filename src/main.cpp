@@ -7,6 +7,7 @@
 
 #include "keyboard_configurator/key_activity.hpp"
 #include "keyboard_configurator/key_activity_watcher.hpp"
+#include "keyboard_configurator/doom_fire_preset.hpp"
 #include "keyboard_configurator/rainbow_wave_preset.hpp"
 #include "keyboard_configurator/static_color_preset.hpp"
 #include "keyboard_configurator/star_matrix_preset.hpp"
@@ -27,6 +28,7 @@ using kb::cfg::RuntimeConfig;
 using kb::cfg::StaticColorPreset;
 using kb::cfg::StarMatrixPreset;
 using kb::cfg::KeyMapPreset;
+using kb::cfg::DoomFirePreset;
 using kb::cfg::LiquidPlasmaPreset;
 using kb::cfg::ReactionDiffusionPreset;
 using kb::cfg::SmokePreset;
@@ -44,6 +46,7 @@ PresetRegistry buildRegistry() {
     registry.registerPreset("liquid_plasma", [] { return std::make_unique<LiquidPlasmaPreset>(); });
     registry.registerPreset("reaction_diffusion", [] { return std::make_unique<ReactionDiffusionPreset>(); });
     registry.registerPreset("smoke", [] { return std::make_unique<SmokePreset>(); });
+    registry.registerPreset("doom_fire", [] { return std::make_unique<DoomFirePreset>(); });
     return registry;
 }
 
