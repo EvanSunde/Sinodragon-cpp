@@ -30,6 +30,8 @@ void EffectEngine::setPresets(std::vector<std::unique_ptr<LightingPreset>> prese
     for (auto& mask : preset_masks_) {
         mask.assign(model_.keyCount(), true);
     }
+
+    applyKeyActivityProvider();
 }
 
 void EffectEngine::setPresets(std::vector<std::unique_ptr<LightingPreset>> presets,
@@ -44,6 +46,11 @@ void EffectEngine::setPresets(std::vector<std::unique_ptr<LightingPreset>> prese
             }
         }
     }
+}
+
+void EffectEngine::setKeyActivityProvider(KeyActivityProviderPtr provider) {
+    key_activity_provider_ = std::move(provider);
+    applyKeyActivityProvider();
 }
 
 void EffectEngine::renderFrame(double time_seconds) {
