@@ -4,6 +4,7 @@
 #include <linux/input-event-codes.h>
 #include <libevdev/libevdev.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <chrono>
 #include <iostream>

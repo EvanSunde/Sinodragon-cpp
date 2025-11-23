@@ -36,6 +36,8 @@ using kb::cfg::ReactionDiffusionPreset;
 using kb::cfg::SmokePreset;
 using kb::cfg::HyprlandWatcher;
 using kb::cfg::ShortcutWatcher;
+using kb::cfg::KeyActivityProvider;
+using kb::cfg::KeyActivityWatcher;
 
 namespace {
 

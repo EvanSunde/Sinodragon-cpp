@@ -161,4 +161,15 @@ void EffectEngine::setPresetMasks(const std::vector<std::vector<bool>>& masks, b
     }
 }
 
+void EffectEngine::applyKeyActivityProvider() {
+    if (presets_.empty()) {
+        return;
+    }
+    for (auto& preset : presets_) {
+        if (preset) {
+            preset->setKeyActivityProvider(key_activity_provider_);
+        }
+    }
+}
+
 }  // namespace kb::cfg
