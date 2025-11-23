@@ -12,6 +12,8 @@
 
 #include <optional>
 
+#include <libevdev/libevdev.h>
+
 #include "keyboard_configurator/hidapi_transport.hpp"
 #include "keyboard_configurator/logging_transport.hpp"
 
@@ -106,6 +108,72 @@ KeyboardModel::Layout readLayout(const std::filesystem::path& path) {
     return layout;
 }
 
+int parseKeycodeToken(const std::string& raw) {
+    std::string token = trim(raw);
+    if (token.empty()) {
+        return -1;
+    }
+    std::string upper;
+    upper.reserve(token.size());
+    for (char ch : token) {
+        upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(ch))));
+    }
+    if (upper == "NAN" || upper == "NONE") {
+        return -1;
+    }
+    if (upper.rfind("KEY_", 0) == 0 || upper.rfind("BTN_", 0) == 0) {
+        int code = libevdev_event_code_from_name(EV_KEY, upper.c_str());
+        if (code >= 0) {
+            return code;
+        }
+        throw std::runtime_error("Unknown keycode name: " + token);
+    }
+    try {
+        return std::stoi(token);
+    } catch (...) {
+        throw std::runtime_error("Invalid keycode token: " + token);
+    }
+}
+
+std::vector<int> readKeycodeCsv(const std::filesystem::path& path,
+                                const KeyboardModel::Layout& layout) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("Failed to open keycode file: " + path.string());
+    }
+
+    std::vector<int> out;
+    std::string line;
+    std::size_t row_index = 0;
+    while (std::getline(in, line)) {
+        line = trim(line);
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+        if (row_index >= layout.size()) {
+            throw std::runtime_error("Keycode file has more rows than layout: " + path.string());
+        }
+        const auto& layout_row = layout[row_index];
+        std::vector<int> row_codes;
+        std::istringstream line_stream(line);
+        std::string token;
+        while (std::getline(line_stream, token, ',')) {
+            row_codes.push_back(parseKeycodeToken(token));
+        }
+        if (row_codes.size() != layout_row.size()) {
+            throw std::runtime_error("Keycode row size mismatch for row " + std::to_string(row_index));
+        }
+        out.insert(out.end(), row_codes.begin(), row_codes.end());
+        ++row_index;
+    }
+
+    if (row_index != layout.size()) {
+        throw std::runtime_error("Keycode file has fewer rows than layout: " + path.string());
+    }
+
+    return out;
+}
+
 std::unique_ptr<DeviceTransport> createTransport(const std::string& id) {
     if (id == "logging") {
         return std::make_unique<LoggingTransport>();
@@ -171,6 +239,7 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     std::vector<std::uint8_t> packet_header;
     std::size_t packet_length = 0;
     std::filesystem::path layout_path;
+    std::filesystem::path keycodes_path;
     std::string transport_id;
     std::map<std::size_t, PresetSpec> presets_by_index;
     std::uint32_t frame_interval_ms = 33;
@@ -336,6 +405,8 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
             packet_length = static_cast<std::size_t>(parseNumber(value));
         } else if (key == "keyboard.layout") {
             layout_path = base_dir / value;
+        } else if (key == "keyboard.keycodes") {
+            keycodes_path = base_dir / value;
         } else if (key == "transport") {
             transport_id = value;
         } else if (key == "engine.frame_interval_ms") {
@@ -439,6 +510,12 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     }
 
     auto layout = readLayout(layout_path);
+    std::vector<int> keycodes;
+    bool has_keycodes = false;
+    if (!keycodes_path.empty()) {
+        keycodes = readKeycodeCsv(keycodes_path, layout);
+        has_keycodes = true;
+    }
 
     const auto frame_interval = std::chrono::milliseconds(frame_interval_ms == 0 ? 1 : frame_interval_ms);
 
@@ -465,6 +542,10 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     runtime_config.transport = createTransport(transport_id);
     if (!runtime_config.transport) {
         throw std::runtime_error("Transport creation failed");
+    }
+
+    if (has_keycodes) {
+        runtime_config.model.setKeycodeMap(keycodes);
     }
 
     if (!presets_by_index.empty()) {

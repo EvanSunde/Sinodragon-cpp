@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "keyboard_configurator/key_activity.hpp"
 #include "keyboard_configurator/key_color_frame.hpp"
 #include "keyboard_configurator/keyboard_model.hpp"
 #include "keyboard_configurator/types.hpp"
@@ -18,6 +19,9 @@ public:
                         double time_seconds,
                         KeyColorFrame& frame) = 0;
     [[nodiscard]] virtual bool isAnimated() const noexcept { return false; }
+    virtual void setKeyActivityProvider(KeyActivityProviderPtr provider) {
+        (void)provider;
+    }
 };
 
 }  // namespace kb::cfg

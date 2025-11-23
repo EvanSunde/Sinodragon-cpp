@@ -23,6 +23,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(keyboard_configurator STATIC
     src/keyboard_model.cpp
     src/key_color_frame.cpp
+    src/key_activity.cpp
+    src/key_activity_watcher.cpp
     src/preset_registry.cpp
     src/static_color_preset.cpp
     src/rainbow_wave_preset.cpp
@@ -31,6 +33,8 @@ add_library(keyboard_configurator STATIC
     src/liquid_plasma_preset.cpp
     src/reaction_diffusion_preset.cpp
     src/smoke_preset.cpp
+    src/doom_fire_preset.cpp
+    src/reactive_ripple_preset.cpp
     src/effect_engine.cpp
     src/config_loader.cpp
     src/configurator_cli.cpp

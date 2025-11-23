@@ -39,6 +39,10 @@ public:
 
     [[nodiscard]] std::size_t keyCount() const noexcept { return key_labels_.size(); }
     [[nodiscard]] std::optional<std::size_t> indexForKey(const std::string& label) const;
+    [[nodiscard]] std::optional<std::size_t> indexForKeycode(int keycode) const;
+    [[nodiscard]] bool hasKeycodeMap() const noexcept { return !keycode_to_index_.empty(); }
+
+    void setKeycodeMap(const std::vector<int>& keycodes);
 
     [[nodiscard]] std::vector<std::uint8_t> encodeFrame(const KeyColorFrame& frame) const;
 
@@ -51,6 +55,7 @@ private:
     Layout layout_;
     std::vector<std::string> key_labels_;
     std::unordered_map<std::string, std::size_t> key_to_index_;
+    std::vector<std::size_t> keycode_to_index_;
     std::optional<std::uint16_t> interface_usage_page_;
     std::optional<std::uint16_t> interface_usage_;
 };

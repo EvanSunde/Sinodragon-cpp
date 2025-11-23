@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "keyboard_configurator/device_transport.hpp"
+#include "keyboard_configurator/key_activity.hpp"
 #include "keyboard_configurator/key_color_frame.hpp"
 #include "keyboard_configurator/keyboard_model.hpp"
 #include "keyboard_configurator/preset.hpp"
@@ -18,6 +19,7 @@ public:
     void setPresets(std::vector<std::unique_ptr<LightingPreset>> presets);
     void setPresets(std::vector<std::unique_ptr<LightingPreset>> presets,
                     std::vector<std::vector<bool>> masks);
+    void setKeyActivityProvider(KeyActivityProviderPtr provider);
     void renderFrame(double time_seconds);
     bool pushFrame();
 
@@ -42,6 +44,9 @@ private:
     std::vector<bool> preset_enabled_;
     std::vector<bool> preset_animated_;
     std::vector<std::vector<bool>> preset_masks_;
+    KeyActivityProviderPtr key_activity_provider_;
+
+    void applyKeyActivityProvider();
 };
 
 }  // namespace kb::cfg
