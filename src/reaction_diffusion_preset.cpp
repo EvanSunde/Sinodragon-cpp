@@ -46,6 +46,29 @@ void ReactionDiffusionPreset::configure(const ParameterMap& params) {
     if (auto it = params.find("speed"); it != params.end()) speed_ = std::stod(it->second);
     if (auto it = params.find("color_a"); it != params.end()) color_a_ = parseHexColor(it->second);
     if (auto it = params.find("color_b"); it != params.end()) color_b_ = parseHexColor(it->second);
+
+    auto parseBool = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return value == "1" || value == "true" || value == "yes" || value == "on";
+    };
+    if (auto it = params.find("reactive"); it != params.end()) {
+        reactive_enabled_ = parseBool(it->second);
+    }
+    auto parseClamp = [&](const char* key, double& target, double min_v) {
+        if (auto it = params.find(key); it != params.end()) {
+            try {
+                double v = std::stod(it->second);
+                target = std::max(min_v, v);
+            } catch (...) {
+            }
+        }
+    };
+    parseClamp("injection_amount", injection_amount_, 0.0);
+    parseClamp("injection_radius", injection_radius_, 0.001);
+    parseClamp("injection_decay", injection_decay_, 0.01);
+    parseClamp("injection_history", injection_history_, 0.05);
 }
 
 void ReactionDiffusionPreset::initGrid() {
@@ -117,6 +140,8 @@ void ReactionDiffusionPreset::render(const KeyboardModel& model,
     if (!inited_) initGrid();
     if (!coords_built_) buildCoords(model);
 
+    applyKeyActivityInjection();
+
     double dt = 0.5 * speed_;
     for (int s = 0; s < steps_per_frame_; ++s) step(dt);
 
@@ -143,6 +168,65 @@ void ReactionDiffusionPreset::render(const KeyboardModel& model,
         c.g = static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(color_a_.g * (1.0 - t) + color_b_.g * t)), 0, 255));
         c.b = static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(color_a_.b * (1.0 - t) + color_b_.b * t)), 0, 255));
         frame.setColor(i, c);
+    }
+}
+
+void ReactionDiffusionPreset::applyKeyActivityInjection() {
+    if (!reactive_enabled_ || !key_activity_provider_ || !coords_built_) {
+        return;
+    }
+    const auto total_keys = xs_.size();
+    if (total_keys == 0 || width_ <= 0 || height_ <= 0) {
+        return;
+    }
+    const auto events = key_activity_provider_->recentEvents(injection_history_);
+    if (events.empty()) {
+        return;
+    }
+
+    const double now = key_activity_provider_->nowSeconds();
+    const double decay = std::max(0.01, injection_decay_);
+    const double radius_cells = std::max(1.0, injection_radius_ * std::min(width_, height_));
+    const double radius2 = radius_cells * radius_cells;
+    const int radius_i = static_cast<int>(std::ceil(radius_cells));
+
+    auto indexAt = [&](int x, int y) {
+        x = (x % width_ + width_) % width_;
+        y = (y % height_ + height_) % height_;
+        return y * width_ + x;
+    };
+
+    for (const auto& ev : events) {
+        if (ev.key_index >= total_keys) {
+            continue;
+        }
+        double age = std::max(0.0, now - ev.time_seconds);
+        double temporal = std::exp(-age / decay);
+        double weight = injection_amount_ * ev.intensity * temporal;
+        if (weight <= 0.0) {
+            continue;
+        }
+        double gx = xs_[ev.key_index] * (width_ - 1);
+        double gy = ys_[ev.key_index] * (height_ - 1);
+        int cx = static_cast<int>(std::round(gx));
+        int cy = static_cast<int>(std::round(gy));
+
+        for (int dy = -radius_i; dy <= radius_i; ++dy) {
+            for (int dx = -radius_i; dx <= radius_i; ++dx) {
+                double dist2 = static_cast<double>(dx * dx + dy * dy);
+                if (dist2 > radius2) {
+                    continue;
+                }
+                double spatial = std::exp(-dist2 / (radius2 * 0.5 + 1e-6));
+                double delta = weight * spatial;
+                if (delta <= 0.0) {
+                    continue;
+                }
+                int idx = indexAt(cx + dx, cy + dy);
+                u_[idx] = std::clamp(u_[idx] - delta, 0.0, 1.0);
+                v_[idx] = std::clamp(v_[idx] + delta, 0.0, 1.0);
+            }
+        }
     }
 }
 

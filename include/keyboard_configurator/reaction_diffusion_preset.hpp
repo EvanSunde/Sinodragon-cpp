@@ -14,6 +14,9 @@ public:
                 double time_seconds,
                 KeyColorFrame& frame) override;
     [[nodiscard]] bool isAnimated() const noexcept override { return true; }
+    void setKeyActivityProvider(KeyActivityProviderPtr provider) override {
+        key_activity_provider_ = std::move(provider);
+    }
 
 private:
     int width_{96};
@@ -33,12 +36,20 @@ private:
     std::vector<double> u_;
     std::vector<double> v_;
 
+    KeyActivityProviderPtr key_activity_provider_;
+    bool reactive_enabled_{true};
+    double injection_amount_{0.8};
+    double injection_radius_{0.08};
+    double injection_decay_{0.6};
+    double injection_history_{1.5};
+
     bool coords_built_{false};
     std::vector<double> xs_;
     std::vector<double> ys_;
     void buildCoords(const KeyboardModel& model);
     void initGrid();
     void step(double dt);
+    void applyKeyActivityInjection();
 };
 
 }  // namespace kb::cfg
