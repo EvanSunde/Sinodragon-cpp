@@ -1,0 +1,171 @@
+# ================================================
+# Lighting Configuration Presets Information
+# ================================================
+# This file describes the various effects and the configuration options
+# available for each preset defined in your settings.
+#
+# Each entry below corresponds to a specific effect type and its parameters.
+# Colors are specified in hexadecimal format (#RRGGBB).
+# ================================================
+
+
+# --- EFFECT TYPE: static_color ---
+# Description: A single solid color illuminated across the entire device.
+[effect.static_color]
+description = "A single solid color across the entire device."
+
+[effect.static_color.options]
+color.type = "Hex color code"
+color.description = "The desired color."
+
+
+# --- EFFECT TYPE: rainbow_wave ---
+# Description: A dynamic, smoothly moving wave of rainbow colors.
+[effect.rainbow_wave]
+description = "A dynamic, smoothly moving wave of rainbow colors."
+
+[effect.rainbow_wave.options]
+speed.type = "Float"
+speed.description = "Controls how quickly the wave moves across the surface."
+scale.type = "Float"
+scale.description = "Determines the size or frequency of the color bands in the wave."
+tint.type = "Hex color code (optional)"
+tint.description = "Overlays a specific color onto the rainbow wave."
+tint_mix.type = "Float (optional, 0.0 to 1.0)"
+tint_mix.description = "How strongly the tint color is blended with the rainbow effect."
+
+
+# --- EFFECT TYPE: star_matrix ---
+# Description: A dark background with randomly appearing, sparkling 'stars' that fade in and out.
+[effect.star_matrix]
+description = "A dark background with randomly appearing, sparkling 'stars' that fade in and out."
+
+[effect.star_matrix.options]
+star.type = "Hex color code"
+star.description = "The color of the sparkling stars (e.g., #FFFFFF for white)."
+background.type = "Hex color code"
+background.description = "The background color (e.g., #101010 for dark gray/near black)."
+density.type = "Float"
+density.description = "How frequently stars spawn or how many are visible at once."
+speed.type = "Float"
+speed.description = "Controls the rate at which stars appear and fade away."
+
+
+# --- EFFECT TYPE: liquid_plasma ---
+# Description: A smooth, flowing, organic liquid or plasma effect using a gradient of specified colors. Can be reactive to input.
+[effect.liquid_plasma]
+description = "A smooth, flowing, organic liquid or plasma effect using a gradient of specified colors. Can be reactive to input."
+
+[effect.liquid_plasma.options]
+speed.type = "Float"
+speed.description = "Speed of the overall motion."
+scale.type = "Float"
+scale.description = "Size of the plasma waves."
+wave_complexity.type = "Integer"
+wave_complexity.description = "The complexity or turbulence of the liquid motion."
+mix_mode.type = "String"
+mix_mode.description = "How colors blend (e.g., 'linear')."
+colors.type = "Comma-separated Hex color codes"
+colors.description = "The primary colors used in the gradient."
+reactive.type = "Boolean (optional)"
+reactive.description = "Set to true to enable a secondary effect triggered by user input."
+reactive_color.type = "Hex color code (optional)"
+reactive_color.description = "Color of the reactive ripple/splash."
+reactive_history.type = "Float (optional)"
+reactive_decay.type = "Float (optional)"
+reactive_spread.type = "Float (optional)"
+reactive_intensity.type = "Float (optional)"
+# Descriptions for reactive options omitted for brevity, but relate to reactive effect behavior.
+
+
+# --- EFFECT TYPE: reaction_diffusion ---
+# Description: A complex, algorithmic cellular automaton simulation, creating organic patterns. Reactive via "injection".
+[effect.reaction_diffusion]
+description = "A complex, algorithmic 'Gray-Scott' cellular automaton simulation, creating organic, self-organizing patterns. Can be reactive by 'injecting' substance B."
+
+[effect.reaction_diffusion.options]
+width.type = "Integer"
+height.type = "Integer"
+description = "The resolution of the simulation grid."
+du.type = "Float"
+dv.type = "Float"
+feed.type = "Float"
+kill.type = "Float"
+description = "Core chemical reaction parameters that define the pattern's behavior."
+steps.type = "Integer"
+description = "The number of simulation steps per frame."
+zoom.type = "Float"
+description = "Controls the visual size of the pattern."
+speed.type = "Float"
+description = "Overall speed of the pattern evolution."
+color_a.type = "Hex color code"
+color_b.type = "Hex color code"
+description = "The two main colors that the pattern transitions between."
+reactive.type = "Boolean (optional)"
+reactive.description = "Set to true to enable injection of the color_b substance via input."
+injection_amount.type = "Float (optional)"
+injection_radius.type = "Float (optional)"
+injection_decay.type = "Float (optional)"
+injection_history.type = "Float (optional)"
+
+
+# --- EFFECT TYPE: smoke ---
+# Description: A smooth, procedural noise-based effect that simulates flowing smoke or clouds. Can be reactive.
+[effect.smoke]
+description = "A smooth, procedural noise-based effect that simulates flowing smoke or clouds. Can be reactive."
+
+[effect.smoke.options]
+speed.type = "Float"
+speed.description = "Speed of the smoke motion."
+scale.type = "Float"
+scale.description = "Visual size/scale of the smoke clouds."
+octaves.type = "Integer/Float"
+persistence.type = "Float"
+lacunarity.type = "Float"
+description = "Parameters that define the noise characteristics and detail level."
+drift_x.type = "Float"
+drift_y.type = "Float"
+description = "Defines the primary direction and speed of the smoke flow."
+contrast.type = "Float"
+description = "Adjusts the contrast between the high and low colors."
+color_low.type = "Hex color code"
+color_high.type = "Hex color code"
+description = "The color range for the smoke effect."
+# Reactive options follow same structure as liquid_plasma
+
+
+# --- EFFECT TYPE: doom_fire ---
+# Description: A classic, pixelated simulation of fire.
+[effect.doom_fire]
+description = "A classic, pixelated simulation of fire, inspired by the original Doom game engine effect."
+
+[effect.doom_fire.options]
+speed.type = "Float"
+speed.description = "Overall speed and intensity of the fire simulation."
+cooling.type = "Float"
+cooling.description = "How quickly the 'heat' dissipates; lower values make the fire taller/hotter."
+spark_chance.type = "Float"
+spark_intensity.type = "Float"
+description = "Controls how often new sparks appear at the bottom and how bright they are."
+
+
+# --- EFFECT TYPE: reactive_ripple ---
+# Description: A subtle background that creates a ripple effect from the point of user input (e.g., key presses).
+[effect.reactive_ripple]
+description = "A subtle background that creates a ripple effect from the point of user input (e.g., key presses)."
+
+[effect.reactive_ripple.options]
+wave_speed.type = "Float"
+wave_speed.description = "How quickly the ripple expands."
+decay_time.type = "Float"
+decay_time.description = "How long it takes for the ripple to fade away."
+thickness.type = "Float"
+thickness.description = "The visual width of the ripple ring."
+history.type = "Float"
+history.description = "How long the input data is stored (affects how quickly multiple key presses stack)."
+intensity.type = "Float"
+intensity.description = "The brightness of the ripple effect."
+color.type = "Hex color code"
+color.description = "The color of the ripples (e.g., #00AAFF for cyan/blue)."
+base_color.type = "Hex color code"
+base_color.description = "The background color when inactive (e.g., #000010 for very dark blue/black)."
