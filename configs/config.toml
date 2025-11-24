@@ -34,6 +34,7 @@ nav_cluster = ["PgUp", "PgDn", "Home", "End", "Insert", "Del", "Backspace", "F5"
 
 # ----------------------------------------------------------------
 # 2. PRESETS (The Asset Library)
+
 # Defined in order of likelihood to be a "Base" vs "Overlay"
 # ----------------------------------------------------------------
 
@@ -41,7 +42,7 @@ nav_cluster = ["PgUp", "PgDn", "Home", "End", "Insert", "Del", "Backspace", "F5"
 
 [presets.shortcut_base_pink]
 type = "static_color"
-color = "#ff0e82"
+color = "#ffcb0e"
 
 [presets.base_yellow] # Old: 0
 type = "static_color"
@@ -97,6 +98,8 @@ background = "#080808"
 density = 0.3
 speed = 0.3
 
+### LIQUID-Plasma ###
+
 [presets.liquid_day] # Old: 21
 type = "liquid_plasma"
 speed = 0.5
@@ -113,6 +116,30 @@ wave_complexity = 2
 mix_mode = "linear"
 colors = ["#000000", "#330000", "#FF4500"]
 
+[presets.liquid_reactive]
+type = "liquid_plasma"
+speed = 0.3
+scale = 1.8
+wave_complexity = 4
+mix_mode = "additive"
+colors = ["#FF00FF", "#00FFFF", "#FFFF00"]
+
+[presets.bio_ocean]
+type = "liquid_plasma"
+speed = 0.2
+scale = 1.5
+wave_complexity = 3
+mix_mode = "linear"
+colors = ["#000033", "#003366", "#006699"] # Deep Ocean Gradients
+reactive = true
+reactive_color = "#00FFFF"  # Bright Cyan Splash
+reactive_intensity = 2.0    # Very bright flash
+reactive_spread = 2.5       # Wide splash
+reactive_decay = 0.92       # Fades smoothly
+reactive_history = 1.0
+
+
+### Reaction Diffusion ###
 [presets.reaction_diffusion] # Old: 23
 type = "reaction_diffusion"
 width = 96
@@ -127,6 +154,26 @@ speed = 1.0
 color_a = "#0A0A10"
 color_b = "#77FFEE"
 
+[presets.digital_mold]
+type = "reaction_diffusion"
+width = 48         # Lower resolution for "chunkier" pixels
+height = 12
+du = 0.2097
+dv = 0.105
+feed = 0.037       # Specific math for "growing spots"
+kill = 0.06
+steps = 8          # Fast simulation
+zoom = 1.0
+speed = 1.0
+color_a = "#000000" # Background (Black)
+color_b = "#39FF14" # Growth (Neon Green)
+reactive = true
+injection_amount = 0.8
+injection_radius = 1.5
+injection_decay = 0.95
+injection_history = 2.0
+
+### Smoke Effects ###
 [presets.smoke_day] # Old: 24
 type = "smoke"
 speed = 0.4
@@ -152,6 +199,45 @@ drift_y = -0.4
 contrast = 1.2
 color_low = "#050505"
 color_high = "#304040"
+
+[presets.spirit_mist]
+type = "smoke"
+speed = 0.3
+scale = 3.0
+octaves = 4
+persistence = 0.6
+lacunarity = 2.0
+drift_x = 0.1      # Slight right drift
+drift_y = -0.4     # Strong upward drift (Heat rising)
+contrast = 1.5
+color_low = "#1a0b2e"  # Dark Purple
+color_high = "#ffd700" # Gold highlights
+reactive = true
+reactive_color = "#FFFFFF"
+reactive_intensity = 1.8
+reactive_spread = 3.0   # Large puffy clouds
+reactive_decay = 0.96   # Lingers for a while
+reactive_history = 3.0
+
+
+### Reactive Ripple Effects ###
+[presets.radar_sonar]
+type = "reactive_ripple"
+base_color = "#000500" # Almost black green
+color = "#00FF00"      # Radar Green
+wave_speed = 2.5       # Fast expansion
+decay_time = 1.5
+thickness = 1.0        # Thin precise ring
+history = 2.0
+intensity = 1.0
+
+### Doom Fire Effects ###
+[presets.soul_fire]
+type = "doom_fire"
+speed = 1.2          # Fast, aggressive fire
+cooling = 0.04       # Low cooling = taller flames
+spark_chance = 0.6   # Frequent sparks
+spark_intensity = 1.0
 
 # --- Overlays / Highlights ---
 [presets.rainbow_fast] # Old: 2

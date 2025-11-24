@@ -129,8 +129,10 @@ void SmokePreset::configure(const ParameterMap& params) {
     parseClamp("reactive_decay", reactive_decay_, 0.01);
     parseClamp("reactive_spread", reactive_spread_, 0.005);
     parseClamp("reactive_intensity", reactive_intensity_, 0.0);
-    if (auto it = params.find("reactive_color"); it != params.end()) {
-        reactive_color_ = parseHexColor(it->second);
+    parseClamp("reactive_displacement", reactive_displacement_, 0.0);
+    parseClamp("reactive_push_duration", reactive_push_duration_, 0.0);
+    if (auto it = params.find("reactive_push"); it != params.end()) {
+        reactive_push_ = parseBool(it->second);
     }
 }
 
@@ -161,12 +163,24 @@ void SmokePreset::render(const KeyboardModel& model,
     if (frame.size() != total) frame.resize(total);
     if (!coords_built_) buildCoords(model);
 
+    std::vector<double> disp_x;
+    std::vector<double> disp_y;
+    computeReactiveDisplacement(disp_x, disp_y);
+
     double t_anim = time_seconds * speed_;
     double offset_x = time_seconds * drift_x_;
     double offset_y = time_seconds * drift_y_;
     for (std::size_t i = 0; i < total; ++i) {
-        double x = xs_[i] * scale_ + offset_x;
-        double y = ys_[i] * scale_ + offset_y;
+        double base_x = xs_[i];
+        double base_y = ys_[i];
+        if (i < disp_x.size()) {
+            base_x = std::clamp(base_x + disp_x[i], 0.0, 1.0);
+        }
+        if (i < disp_y.size()) {
+            base_y = std::clamp(base_y + disp_y[i], 0.0, 1.0);
+        }
+        double x = base_x * scale_ + offset_x;
+        double y = base_y * scale_ + offset_y;
         double amp = 1.0;
         double freq = 1.0;
         double sum = 0.0;
@@ -187,16 +201,13 @@ void SmokePreset::render(const KeyboardModel& model,
         c.b = static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(color_low_.b * (1.0 - v) + color_high_.b * v)), 0, 255));
         frame.setColor(i, c);
     }
-
-    applyReactiveOverlay(frame);
 }
 
-void SmokePreset::applyReactiveOverlay(KeyColorFrame& frame) {
-    if (!reactive_enabled_ || !provider_ || !coords_built_) {
-        return;
-    }
-    const auto total = frame.size();
-    if (xs_.size() != total || ys_.size() != total) {
+void SmokePreset::computeReactiveDisplacement(std::vector<double>& dx, std::vector<double>& dy) {
+    const std::size_t total = xs_.size();
+    dx.assign(total, 0.0);
+    dy.assign(total, 0.0);
+    if (!reactive_enabled_ || !provider_ || !coords_built_ || total == 0) {
         return;
     }
     const auto events = provider_->recentEvents(reactive_history_);
@@ -204,48 +215,51 @@ void SmokePreset::applyReactiveOverlay(KeyColorFrame& frame) {
         return;
     }
 
-    const double spread = std::max(0.005, reactive_spread_);
+    const double spread = std::max(0.01, reactive_spread_);
     const double sigma2 = 2.0 * spread * spread;
     const double decay = std::max(0.01, reactive_decay_);
     const double now = provider_->nowSeconds();
+    const double base_disp = std::max(0.0, reactive_displacement_);
+    const double direction_sign = reactive_push_ ? 1.0 : -1.0;
+    const double push_window = std::max(0.0, reactive_push_duration_);
 
-    std::vector<double> overlay(total, 0.0);
     for (const auto& ev : events) {
-        if (ev.key_index >= xs_.size()) {
+        if (ev.key_index >= total) {
             continue;
         }
         const double ex = xs_[ev.key_index];
         const double ey = ys_[ev.key_index];
         const double age = std::max(0.0, now - ev.time_seconds);
-        const double temporal = std::exp(-age / decay);
+        if (push_window > 0.0 && age > push_window) {
+            continue;
+        }
+        double window_factor = 1.0;
+        if (push_window > 0.0) {
+            window_factor = std::max(0.0, 1.0 - age / push_window);
+        }
+        const double temporal = std::exp(-age / decay) * window_factor;
         const double weight = ev.intensity * reactive_intensity_ * temporal;
         if (weight <= 0.0) {
             continue;
         }
         for (std::size_t k = 0; k < total; ++k) {
-            const double dx = xs_[k] - ex;
-            const double dy = ys_[k] - ey;
-            const double dist2 = dx * dx + dy * dy;
-            const double spatial = std::exp(-dist2 / sigma2);
-            overlay[k] += weight * spatial;
+            double px = xs_[k] - ex;
+            double py = ys_[k] - ey;
+            double dist2 = px * px + py * py;
+            double spatial = std::exp(-dist2 / sigma2);
+            double magnitude = base_disp * weight * spatial;
+            if (magnitude <= 0.0) {
+                continue;
+            }
+            double len = std::sqrt(dist2);
+            if (len < 1e-5) {
+                continue;
+            }
+            double dir_x = px / len;
+            double dir_y = py / len;
+            dx[k] += direction_sign * dir_x * magnitude;
+            dy[k] += direction_sign * dir_y * magnitude;
         }
-    }
-
-    auto blendChannel = [](std::uint8_t base, std::uint8_t highlight, double amount) {
-        amount = std::clamp(amount, 0.0, 1.0);
-        return static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(base + (highlight - base) * amount)), 0, 255));
-    };
-
-    for (std::size_t k = 0; k < total; ++k) {
-        const double amt = std::clamp(overlay[k], 0.0, 1.0);
-        if (amt <= 0.0) {
-            continue;
-        }
-        auto color = frame.color(k);
-        color.r = blendChannel(color.r, reactive_color_.r, amt);
-        color.g = blendChannel(color.g, reactive_color_.g, amt);
-        color.b = blendChannel(color.b, reactive_color_.b, amt);
-        frame.setColor(k, color);
     }
 }
 

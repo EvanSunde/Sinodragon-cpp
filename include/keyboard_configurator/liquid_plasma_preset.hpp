@@ -32,13 +32,18 @@ private:
     double reactive_decay_{0.35};
     double reactive_spread_{0.12};
     double reactive_intensity_{1.0};
-    RgbColor reactive_color_{255, 255, 255};
+    double reactive_displacement_{0.18};
+    double reactive_phase_shift_{1.0};
+    double reactive_push_duration_{0.2};
+    bool reactive_push_{false};
 
     bool coords_built_{false};
     std::vector<double> xs_;
     std::vector<double> ys_;
     void buildCoords(const KeyboardModel& model);
-    void applyReactiveOverlay(KeyColorFrame& frame);
+    bool computeReactiveFields(std::vector<double>& disp_x,
+                               std::vector<double>& disp_y,
+                               std::vector<double>& phase_shift);
 };
 
 }  // namespace kb::cfg

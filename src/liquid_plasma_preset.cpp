@@ -113,8 +113,11 @@ void LiquidPlasmaPreset::configure(const ParameterMap& params) {
     parseClamp("reactive_decay", reactive_decay_, 0.01);
     parseClamp("reactive_spread", reactive_spread_, 0.005);
     parseClamp("reactive_intensity", reactive_intensity_, 0.0);
-    if (auto it = params.find("reactive_color"); it != params.end()) {
-        reactive_color_ = parseHexColor(it->second);
+    parseClamp("reactive_displacement", reactive_displacement_, 0.0);
+    parseClamp("reactive_phase_shift", reactive_phase_shift_, 0.0);
+    parseClamp("reactive_push_duration", reactive_push_duration_, 0.0);
+    if (auto it = params.find("reactive_push"); it != params.end()) {
+        reactive_push_ = parseBool(it->second);
     }
 }
 
@@ -145,23 +148,40 @@ void LiquidPlasmaPreset::render(const KeyboardModel& model,
     if (frame.size() != total) frame.resize(total);
     if (!coords_built_) buildCoords(model);
 
-    double t = time_seconds * speed_ * 2.0 * 3.14159265358979323846;
+    const double t = time_seconds * speed_ * 2.0 * 3.14159265358979323846;
+    std::vector<double> disp_x;
+    std::vector<double> disp_y;
+    std::vector<double> phase_shift;
+    const bool has_reactive_fields = computeReactiveFields(disp_x, disp_y, phase_shift);
+
     for (std::size_t i = 0; i < total; ++i) {
-        double x = xs_[i] * scale_;
-        double y = ys_[i] * scale_;
+        double base_x = xs_[i];
+        double base_y = ys_[i];
+        if (has_reactive_fields && i < disp_x.size()) {
+            base_x = std::clamp(base_x + disp_x[i], 0.0, 1.0);
+        }
+        if (has_reactive_fields && i < disp_y.size()) {
+            base_y = std::clamp(base_y + disp_y[i], 0.0, 1.0);
+        }
+        double x = base_x * scale_;
+        double y = base_y * scale_;
         double v = 0.0;
         int terms = 0;
+        double local_t = t;
+        if (has_reactive_fields && i < phase_shift.size()) {
+            local_t += phase_shift[i];
+        }
         // Directional sine components based on wave_complexity_
         for (int k = 0; k < wave_complexity_; ++k) {
             double ax = static_cast<double>(2 + k);
             double ay = static_cast<double>(3 + (k % 3));
-            v += std::sin(ax * x + t * (1.0 + 0.31 * k)); ++terms;
-            v += std::sin(ay * y + t * (0.73 + 0.17 * k)); ++terms;
-            if ((k % 2) == 0) { v += std::sin((ax + ay) * (x + y) + t * (0.53 + 0.11 * k)); ++terms; }
+            v += std::sin(ax * x + local_t * (1.0 + 0.31 * k)); ++terms;
+            v += std::sin(ay * y + local_t * (0.73 + 0.17 * k)); ++terms;
+            if ((k % 2) == 0) { v += std::sin((ax + ay) * (x + y) + local_t * (0.53 + 0.11 * k)); ++terms; }
         }
         // One radial term
         double r2 = x * x + y * y;
-        v += std::sin((2.5 + 0.5 * wave_complexity_) * std::sqrt(r2 + 1e-6) + t * (1.0 + 0.21 * wave_complexity_));
+        v += std::sin((2.5 + 0.5 * wave_complexity_) * std::sqrt(r2 + 1e-6) + local_t * (1.0 + 0.21 * wave_complexity_));
         ++terms;
         // Normalize to [0,1]
         double v01 = (v + static_cast<double>(terms)) / (2.0 * static_cast<double>(terms));
@@ -191,65 +211,79 @@ void LiquidPlasmaPreset::render(const KeyboardModel& model,
         frame.setColor(i, c);
     }
 
-    applyReactiveOverlay(frame);
 }
 
-void LiquidPlasmaPreset::applyReactiveOverlay(KeyColorFrame& frame) {
-    if (!reactive_enabled_ || !provider_) {
-        return;
+bool LiquidPlasmaPreset::computeReactiveFields(std::vector<double>& disp_x,
+                                               std::vector<double>& disp_y,
+                                               std::vector<double>& phase_shift) {
+    if (!reactive_enabled_ || !provider_ || !coords_built_) {
+        return false;
     }
-    const auto total = frame.size();
-    if (xs_.size() != total || ys_.size() != total || !coords_built_) {
-        return;
-    }
-    const auto events = provider_->recentEvents(reactive_history_);
-    if (events.empty()) {
-        return;
+    const auto total = xs_.size();
+    disp_x.assign(total, 0.0);
+    disp_y.assign(total, 0.0);
+    phase_shift.assign(total, 0.0);
+    if (total == 0) {
+        return false;
     }
 
-    std::vector<double> energy(total, 0.0);
+    const auto events = provider_->recentEvents(reactive_history_);
+    if (events.empty()) {
+        return false;
+    }
+
     const double spread = std::max(0.005, reactive_spread_);
     const double sigma2 = 2.0 * spread * spread;
     const double decay = std::max(0.01, reactive_decay_);
     const double now = provider_->nowSeconds();
+    const double base_disp = std::max(0.0, reactive_displacement_);
+    const double phase_scale = std::max(0.0, reactive_phase_shift_);
+    const double direction_sign = reactive_push_ ? 1.0 : -1.0;
+    const double push_window = std::max(0.0, reactive_push_duration_);
 
     for (const auto& ev : events) {
-        if (ev.key_index >= xs_.size()) {
+        if (ev.key_index >= total) {
             continue;
         }
         const double ex = xs_[ev.key_index];
         const double ey = ys_[ev.key_index];
         const double age = std::max(0.0, now - ev.time_seconds);
-        const double temporal = std::exp(-age / decay);
+        if (push_window > 0.0 && age > push_window) {
+            continue;
+        }
+        double window_factor = 1.0;
+        if (push_window > 0.0) {
+            window_factor = std::max(0.0, 1.0 - age / push_window);
+        }
+        const double temporal = std::exp(-age / decay) * window_factor;
         const double weight = ev.intensity * reactive_intensity_ * temporal;
         if (weight <= 0.0) {
             continue;
         }
         for (std::size_t k = 0; k < total; ++k) {
-            const double dx = xs_[k] - ex;
-            const double dy = ys_[k] - ey;
-            const double dist2 = dx * dx + dy * dy;
+            const double px = xs_[k] - ex;
+            const double py = ys_[k] - ey;
+            const double dist2 = px * px + py * py;
             const double spatial = std::exp(-dist2 / sigma2);
-            energy[k] += weight * spatial;
+            const double contribution = weight * spatial;
+            if (contribution <= 0.0) {
+                continue;
+            }
+            const double len = std::sqrt(dist2);
+            if (base_disp > 0.0 && len > 1e-6) {
+                const double magnitude = base_disp * contribution;
+                const double dir_x = px / len;
+                const double dir_y = py / len;
+                disp_x[k] += direction_sign * dir_x * magnitude;
+                disp_y[k] += direction_sign * dir_y * magnitude;
+            }
+            if (phase_scale > 0.0) {
+                phase_shift[k] += direction_sign * phase_scale * contribution;
+            }
         }
     }
 
-    auto lerpChannel = [](std::uint8_t base, std::uint8_t target, double t) {
-        t = std::clamp(t, 0.0, 1.0);
-        return static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(base + (target - base) * t)), 0, 255));
-    };
-
-    for (std::size_t k = 0; k < total; ++k) {
-        const double e = std::clamp(energy[k], 0.0, 1.0);
-        if (e <= 0.0) {
-            continue;
-        }
-        auto color = frame.color(k);
-        color.r = lerpChannel(color.r, reactive_color_.r, e);
-        color.g = lerpChannel(color.g, reactive_color_.g, e);
-        color.b = lerpChannel(color.b, reactive_color_.b, e);
-        frame.setColor(k, color);
-    }
+    return true;
 }
 
 }  // namespace kb::cfg
