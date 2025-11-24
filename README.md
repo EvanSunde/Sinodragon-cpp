@@ -3,7 +3,38 @@
 ## Redragon keyboard RGB configurator 
 This is a total rewrite of the RGB keyboard configurator in C++ for better performance and maintainability. Uses better Datastructures and algorithm for instant O(1) light highlighting. Supports very huge number of presets, and can be used in any way you want. Example config is given in `/configs/example.cfg`.
 
-Features:
+
+## Painter's Algorithm Rendering
+
+Unlike traditional "On/Off" lighting engines, this daemon uses a Layer-Based approach similar to Photoshop.
+
+- Define "Presets" (Assets) once in your library.
+
+- Stack them infinitely in your Profiles.
+
+- Mix effects: Put a Smoke effect behind a Static Color zone, or overlay a Ripple effect on top of Matrix Rain.
+
+## ⚡ High-Performance Effects
+
+Includes a suite of mathematically optimized C++ effects that run at <1% CPU usage.
+
+- Liquid Plasma: Smooth, oily fluid mixing using sine-wave interference (0% CPU).
+
+- Reaction Diffusion: Biologically inspired "living" patterns (Gray-Scott model).
+
+- Smoke/Fog: Procedural Perlin/Simplex noise with directional wind drift.
+
+- Doom Fire: The classic algorithm, optimized for low-res LED grids.
+
+- Matrix Rain: Digital green cascading code.
+
+## 🧠 Smart "Context-Aware" Automation
+
+- Hyprland Integration: Automatically switches lighting profiles based on the active window class (e.g., Code → Yellow/Blue theme, Kitty → Amber Terminal theme).
+
+- Shortcut Overlay: Hold Ctrl / Shift / Super to instantly highlight available hotkeys on your keyboard. (Supports app-specific shortcut maps!).
+
+Other Features:
 - Modular configurator architecture
 - Configurable via text files
 - 5 MB of Ram usages
@@ -33,7 +64,13 @@ Extending the tool only requires dropping a new keyboard description JSON and im
 
 ## Build & run (Linux)
 
-1. Install dependencies: a C++17 compiler, CMake ≥ 3.16, and `hidapi` development headers (e.g. `sudo apt install cmake g++ libhidapi-dev`).
+1. Install dependencies:
+   - C++17 compiler
+   - CMake ≥ 3.16
+   - `hidapi` development headers (e.g. `sudo apt install libhidapi-dev`)
+   - libevdev (for shortcut highlighting)
+   - tomlplusplus (sudo pacman -Syu tomlplusplus)
+
 2. Configure & build:
    ```bash
    mkdir -p keyboard_configurator/build
@@ -44,7 +81,7 @@ Extending the tool only requires dropping a new keyboard description JSON and im
 3. Prepare a configuration file (examples live in `keyboard_configurator/configs/`). Use `transport = logging` for dry runs or `transport = hidapi` to drive the hardware.
 4. Run the CLI:
    ```bash
-   ./kb_configurator ../configs/example.cfg
+   ./kb_configurator ../configs/config.toml
    ```
 5. Inside the CLI, use `help`, `list`, `toggle <index>`, `set <index> <key> <value>`, and `frame <ms>` to control presets; `quit` exits.
 
@@ -115,3 +152,6 @@ In this layout, each key has 00 00 00 as value which indicates R G B value. For 
 This packet should be sent with the `send_feature_report` function.
 
 ### Happy hacking!
+
+## Contributors
+- @Evan (Lead Developer)
