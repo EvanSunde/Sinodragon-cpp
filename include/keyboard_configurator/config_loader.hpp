@@ -5,33 +5,41 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <optional>
 
 #include "keyboard_configurator/device_transport.hpp"
 #include "keyboard_configurator/keyboard_model.hpp"
 #include "keyboard_configurator/preset_registry.hpp"
-#include "keyboard_configurator/types.hpp"
+#include "keyboard_configurator/types.hpp" // Ensure this exists or defines ParameterMap
 
 namespace kb::cfg {
 
 struct ShortcutProfileConfig {
-    std::string color; // optional, hex like #RRGGBB
-    // bitmask of modifiers (1=CTRL,2=SHIFT,4=ALT,8=SUPER) -> key labels
+    std::string color;
     std::unordered_map<int, std::vector<std::string>> combos;
 };
 
 struct HyprConfig {
     bool enabled{false};
-    std::string events_socket; // optional; if empty, auto-detect
-    // Profile-based mapping
-    std::string default_profile; // e.g. "Default"
-    std::unordered_map<std::string, std::string> class_to_profile; // class -> profile name
-    std::unordered_map<std::string, std::vector<bool>> profile_enabled; // profile -> enabled flags
-    std::unordered_map<std::string, std::vector<std::vector<bool>>> profile_masks; // profile -> masks per preset
-    // Shortcuts
-    int shortcuts_overlay_preset_index{-1}; // preset index used as overlay mask target; -1 to disable
-    std::string default_shortcut; // e.g. "default"
-    std::unordered_map<std::string, std::string> class_to_shortcut; // class -> shortcuts name
-    std::unordered_map<std::string, ShortcutProfileConfig> shortcuts; // name -> config
+    std::string events_socket;
+    std::string default_profile;
+    
+    std::unordered_map<std::string, std::string> class_to_profile;
+    
+    // --- CHANGED: Deprecate the boolean vector, Add the Draw Order vector ---
+    // std::unordered_map<std::string, std::vector<bool>> profile_enabled; // Old
+    std::unordered_map<std::string, std::vector<std::size_t>> profile_draw_order; // NEW: Painter's List
+    
+    // Keep masks (they still apply per-layer)
+    std::unordered_map<std::string, std::vector<std::vector<bool>>> profile_masks; 
+    
+    // Keep legacy enabled map for backward compatibility if needed
+    std::unordered_map<std::string, std::vector<bool>> profile_enabled;
+
+    int shortcuts_overlay_preset_index{-1};
+    std::string default_shortcut;
+    std::unordered_map<std::string, std::string> class_to_shortcut;
+    std::unordered_map<std::string, ShortcutProfileConfig> shortcuts;
 };
 
 struct RuntimeConfig {
@@ -42,15 +50,16 @@ struct RuntimeConfig {
     std::chrono::milliseconds frame_interval{std::chrono::milliseconds{33}};
     std::optional<std::uint16_t> interface_usage_page;
     std::optional<std::uint16_t> interface_usage;
+    
     std::vector<std::vector<bool>> preset_masks;
     std::vector<bool> preset_enabled;
+    
     std::optional<HyprConfig> hypr;
 };
 
 class ConfigLoader {
 public:
     explicit ConfigLoader(const PresetRegistry& registry);
-
     [[nodiscard]] RuntimeConfig loadFromFile(const std::string& path) const;
 
 private:

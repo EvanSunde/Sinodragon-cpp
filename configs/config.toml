@@ -1,0 +1,378 @@
+# ~/.config/Redragon/config.toml
+
+[device]
+name = "Redragon"
+vendor_id = 0x258A
+product_id = 0x0049
+# Hex values must be numbers in TOML array
+packet_header = [0x08, 0x0A, 0x7A, 0x01]
+packet_length = 382
+layout = "example_layout.csv"
+keycodes = "example_keycodes.csv"
+# Interface usage pages
+interface_usage_page = 0xFF00
+interface_usage = 0x0001
+transport = "hidapi"
+frame_interval_ms = 100
+
+[hypr]
+enabled = true
+# This refers to the preset index. Since we use names now, 
+# ensure the engine maps this correctly or relies on shortcut-specific colors.
+shortcuts_overlay_preset = "shortcut_base_pink" 
+
+# ----------------------------------------------------------------
+# 1. ZONES
+# ----------------------------------------------------------------
+[zones]
+wasd = ["W", "A", "S", "D"]
+numpad = ["Num1", "Num2", "Num3", "Num4", "Num5", "Num6", "Num7", "Num8", "Num9", "Num0"]
+num = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+arrows = ["Up", "Down", "Left", "Right"]
+function = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]
+nav_cluster = ["PgUp", "PgDn", "Home", "End", "Insert", "Del", "Backspace", "F5", "F6"]
+
+# ----------------------------------------------------------------
+# 2. PRESETS (The Asset Library)
+# Defined in order of likelihood to be a "Base" vs "Overlay"
+# ----------------------------------------------------------------
+
+# --- Static Bases ---
+
+[presets.shortcut_base_pink]
+type = "static_color"
+color = "#ff0e82"
+
+[presets.base_yellow] # Old: 0
+type = "static_color"
+color = "#FFFF40"
+
+[presets.base_red] # Old: 1
+type = "static_color"
+color = "#FF0000"
+
+[presets.base_pink] # Old: 5
+type = "static_color"
+color = "#ff0e82"
+
+[presets.base_green] # Old: 7
+type = "static_color"
+color = "#00FF00"
+
+[presets.base_purple] # Old: 8
+type = "static_color"
+color = "#2E003E"
+
+[presets.base_dark_red] # Old: 11
+type = "static_color"
+color = "#550000"
+
+[presets.base_deep_blue] # Old: 16
+type = "static_color"
+color = "#000040"
+
+[presets.base_grey_blue] # Old: 14
+type = "static_color"
+color = "#505070"
+
+# --- Animated Bases ---
+[presets.star_white] # Old: 3
+type = "star_matrix"
+star = "#FFFFFF"
+background = "#101010"
+density = 0.2
+speed = 0.2
+
+[presets.matrix_green] # Old: 6
+type = "star_matrix"
+star = "#55FF00"
+background = "#091500"
+density = 0.4
+speed = 0.6
+
+[presets.matrix_amber] # Old: 18
+type = "star_matrix"
+star = "#FFB000"
+background = "#080808"
+density = 0.3
+speed = 0.3
+
+[presets.liquid_day] # Old: 21
+type = "liquid_plasma"
+speed = 0.5
+scale = 1.5
+wave_complexity = 3
+mix_mode = "linear"
+colors = ["#E0FFFF", "#00BFFF", "#1E90AA"]
+
+[presets.liquid_night] # Old: 22
+type = "liquid_plasma"
+speed = 0.2
+scale = 2.0
+wave_complexity = 2
+mix_mode = "linear"
+colors = ["#000000", "#330000", "#FF4500"]
+
+[presets.reaction_diffusion] # Old: 23
+type = "reaction_diffusion"
+width = 96
+height = 32
+du = 0.16
+dv = 0.08
+feed = 0.037
+kill = 0.06
+steps = 8
+zoom = 1.2
+speed = 1.0
+color_a = "#0A0A10"
+color_b = "#77FFEE"
+
+[presets.smoke_day] # Old: 24
+type = "smoke"
+speed = 0.4
+scale = 3.0
+octaves = 3
+persistence = 0.4
+lacunarity = 2.0
+drift_x = 0.3
+drift_y = -0.1
+contrast = 2.5
+color_low = "#E6E6E6"
+color_high = "#58d708"
+
+[presets.smoke_night] # Old: 25
+type = "smoke"
+speed = 0.2
+scale = 2.5
+octaves = 2
+persistence = 0.6
+lacunarity = 2.0
+drift_x = 0.1
+drift_y = -0.4
+contrast = 1.2
+color_low = "#050505"
+color_high = "#304040"
+
+# --- Overlays / Highlights ---
+[presets.rainbow_fast] # Old: 2
+type = "rainbow_wave"
+speed = 0.8
+scale = 0.12
+
+[presets.rainbow_tinted] # Old: 4
+type = "rainbow_wave"
+speed = 0.8
+scale = 0.12
+tint = "#FF80FF"
+tint_mix = 0.3
+
+[presets.wave_cyan_pink] # Old: 9
+type = "rainbow_wave"
+speed = 0.4
+scale = 0.1
+tint = "#00FFFF"
+tint_mix = 0.5
+
+[presets.static_hot_pink] # Old: 10
+type = "static_color"
+color = "#FF007F"
+
+[presets.wave_fire] # Old: 12
+type = "rainbow_wave"
+speed = 1.0
+scale = 0.2
+tint = "#FF4500"
+tint_mix = 0.8
+
+[presets.static_yellow] # Old: 13
+type = "static_color"
+color = "#FFFF00"
+
+[presets.wave_breathing] # Old: 15
+type = "rainbow_wave"
+speed = 0.2
+scale = 0.05
+tint = "#505030"
+tint_mix = 0.9
+
+[presets.static_orange] # Old: 17
+type = "static_color"
+color = "#FF9500"
+
+[presets.static_amber] # Old: 19
+type = "static_color"
+color = "#FFB000"
+
+[presets.static_dim_white] # Old: 20
+type = "static_color"
+color = "#444444"
+
+[presets.static_red_okular] # Old: 26
+type = "static_color"
+color = "#961e00"
+
+# ----------------------------------------------------------------
+# 3. PROFILES
+# ----------------------------------------------------------------
+
+[profiles.default]
+layers = [
+    { preset = "star_white" },
+    { preset = "rainbow_tinted", zones = ["function"] }
+]
+
+[profiles.coding]
+layers = [
+    { preset = "base_yellow" },
+    { preset = "base_red", zones = ["function", "num"] },
+    { preset = "rainbow_fast", zones = ["arrows"] }
+]
+
+[profiles.browsing]
+layers = [
+    { preset = "star_white" }
+]
+
+[profiles.terminal]
+layers = [
+    { preset = "rainbow_fast" }
+]
+
+[profiles.okular]
+layers = [
+    { preset = "static_red_okular" },
+    { preset = "static_red_okular", keys = ["Left", "Up", "Down", "Right", "PgUp", "PgDn", "B", "F1", "F3", "F5", "F6", "F7", "Space", "Home", "End", "Slash", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"] },
+    { preset = "smoke_day" }
+]
+
+[profiles.firefox]
+layers = [
+    { preset = "base_deep_blue" },
+    { preset = "static_orange", zones = ["arrows", "nav_cluster"] },
+    { preset = "static_orange", keys = ["Ctrl", "T", "W", "R", "L", "F"] }
+]
+
+[profiles.kitty]
+layers = [
+    { preset = "matrix_amber" },
+    { preset = "static_dim_white", zones = ["wasd", "num", "function"] },
+    { preset = "static_amber", keys = ["Ctrl", "Shift", "C", "D", "L", "Z", "V", "T", "W", "N", "H", "F", "Comma", "Period"] }
+]
+
+[profiles.matrix]
+layers = [
+    { preset = "matrix_green" },
+    { preset = "base_green", zones = ["numpad"] }, # Assuming logic from description
+    { preset = "base_green", keys = ["Enter", "Space", "Esc", "Tab", "Backslash", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"] }
+]
+
+[profiles.cyberpunk]
+layers = [
+    { preset = "base_purple" },
+    { preset = "wave_cyan_pink", zones = ["function"] },
+    { preset = "static_hot_pink", zones = ["wasd", "arrows"] }
+]
+
+[profiles.magma]
+layers = [
+    { preset = "base_dark_red" },
+    { preset = "wave_fire", zones = ["num"] },
+    { preset = "static_yellow", zones = ["wasd"], keys = ["Space"] }
+]
+
+[profiles.deepfocus]
+layers = [
+    { preset = "wave_breathing" },
+    { preset = "static_grey_blue", zones = ["num", "arrows"] }
+]
+
+[profiles.liquid_d]
+layers = [{ preset = "liquid_day" }]
+
+[profiles.liquid_n]
+layers = [{ preset = "liquid_night" }]
+
+[profiles.reactiondiffusion]
+layers = [{ preset = "base_purple" }] # Check: Your legacy config pointed to preset.8 here?
+
+[profiles.smoke_d]
+layers = [{ preset = "smoke_day" }]
+
+[profiles.smoke_n]
+layers = [{ preset = "smoke_night" }]
+
+# ----------------------------------------------------------------
+# 4. APPS & SHORTCUTS
+# ----------------------------------------------------------------
+
+[apps]
+default_profile = "liquid_n"
+default_shortcut = "default"
+
+[apps.mappings]
+"Code" = "coding"
+"WindSurf" = "liquid_n"
+"kitty" = "kitty"
+"org.kde.dolphin" = "matrix"
+"org.kde.kate" = "smoke_d"
+"zen" = { shortcut = "zen" }
+"org.kde.okular" = { shortcut = "okular" }
+
+# ----------------------------------------------------------------
+# 5. SHORTCUT DEFINITIONS
+# ----------------------------------------------------------------
+
+[shortcuts.default]
+win = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "L", "R", "Tab", "V", "Period", "A", "N", "Slash", "K", "M", "G", "J", "L", "Q", "D", "F", "S", "Enter", "T", "E", "R", "C", "I", "Minus", "Equal", "Shift", "Ctrl", "Left", "Up", "Down", "Right", "Win", "Alt"]
+win_shift = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "M", "S", "A", "X", "T", "C", "R", "L", "N", "B", "P", "W", "Q", "d", "Alt", "Left", "Up", "Down", "Right", "Win", "Ctrl", "Shift", "Alt"]
+win_shift_alt = ["R", "Q", "Slash", "Win", "Shift", "Alt"]
+win_ctrl = ["V", "T", "R", "S", "PgUp", "PgDn", "Left", "Up", "Down", "Right", "Win", "Ctrl", "Shift", "Alt"]
+win_alt = ["A", "Space", "F", "S", "M", "X", "R", "F1", "F11", "F12", "Equal", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "PgUp", "PgDn", "Win", "Ctrl", "Shift", "Alt", "W"]
+win_ctrl_alt = ["T", "Left", "Right", "Win", "Ctrl", "Alt"]
+win_ctrl_shift = ["Left", "Right", "Win", "Ctrl", "Shift"]
+
+[shortcuts.kitty]
+color = "#ff5500"
+ctrl = ["C", "D", "L", "Z"]
+ctrl_shift = ["C", "V", "T", "W", "N", "H", "L", "F", "Comma", "Period", "Left", "Up", "Down", "Right"]
+
+[shortcuts.vscode]
+color = "#f6ff4a"
+ctrl = ["C", "V", "X", "A", "Z", "Y", "F", "H", "S", "O", "N", "W", "P", "B", "J", "K", "L", "Comma", "Period", "Backslash"]
+ctrl_shift = ["P", "F", "H", "N", "T", "W", "L", "K", "V"]
+
+[shortcuts.okular]
+color = "#961e00"
+ctrl = ["1", "2", "3", "4", "5", "6", "A", "C", "E", "F", "G", "J", "M", "O", "P", "Q", "Equal", "Minus"]
+shift = ["F1", "F3", "Down", "Space", "Up"]
+alt = ["Left", "Right"]
+ctrl_shift = ["F", "P", "S", "Z"]
+alt_shift = ["Left", "Right"]
+
+[shortcuts.kate]
+ctrl = ["Minus", "Equal", "Period", "Slash", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "N", "O", "P", "R", "S", "T", "U", "V", "W", "X", "Z", "Home", "End", "Left", "Up", "Down", "Right", "Bksp", "Del", "Enter", "Space", "F1", "F4", "F10", "F12", "Ctrl", "Equal", "Minus"]
+alt = ["J", "PgUp", "PgDn", "Left", "Up", "Down", "Right", "Home"]
+ctrl_shift = ["A", "B", "D", "E", "H", "I", "O", "S", "U", "V", "Z", "Home", "End", "Left", "Up", "Down", "Right", "PgUp", "PgDn", "Enter", "F6"]
+ctrl_alt = ["Enter", "U", "Up", "Down", "O", "C", "M", "Q", "I"]
+alt_shift = ["Up", "Down", "I"]
+ctrl_alt_shift = ["F", "J"]
+
+[shortcuts.dolphin]
+color = "#ff5500"
+ctrl = ["C", "V", "X", "F", "T", "W", "Q", "R", "L", "A", "M", "H"]
+ctrl_shift = ["N", "T", "I"]
+
+[shortcuts.insomnia]
+ctrl = ["Comma", "E", "K", "L", "N", "P", "Enter", "Space", "Apostrophe", "Backslash", "F5"]
+shift = ["F1", "F3", "Left", "Up", "Down", "Right", "PgUp", "PgDn", "Home", "End"]
+alt = ["Left", "Right", "Up", "Down", "Left", "Up", "Down", "Right", "Home"]
+ctrl_shift = ["Comma", "Slash", "E", "F", "G", "H", "I", "L", "N", "P", "R", "Backspace", "Enter", "Home", "End", "Up", "Down", "Left", "Right", "F6"]
+ctrl_alt = ["N"]
+alt_shift = ["U"]
+ctrl_alt_shift = ["Comma"]
+
+[shortcuts.zen]
+color = "#42ff0e"
+ctrl = ["C", "V", "N", "T", "W", "Q", "R", "H", "K", "J", "F", "G", "L", "S", "P", "U", "I", "D", "M", "O", "B", "BracketOpen", "BracketClose", "minus", "equal", "0", "3", "6"]
+ctrl_shift = ["W", "T", "N", "R", "P", "G", "H", "D", "O", "X", "S", "I", "J", "M", "L", "K", "Z", "E", "C", "Y", "A", "B", "Tab", "Del", "BracketClose"]
+ctrl_alt = ["T", "S", "C", "Q", "E", "U", "H", "V", "G", "R", "X", "Z"]

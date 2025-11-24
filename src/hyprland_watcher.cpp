@@ -41,7 +41,6 @@ void HyprlandWatcher::start() {
 void HyprlandWatcher::stop() {
     stop_.store(true);
     if (thread_.joinable()) {
-        // Nudge the thread by sending SIGPIPE ignore is already default; we'll just join
         thread_.join();
     }
 }
@@ -81,11 +80,11 @@ void HyprlandWatcher::runLoop(std::string socket_path) {
             continue;
         }
 
-        // Make reads time out so we can react to stop_
+        // Timeout for 200ms so we can check stop_ flag
         {
             timeval tv{};
             tv.tv_sec = 0;
-            tv.tv_usec = 200 * 1000; // 200ms
+            tv.tv_usec = 200 * 1000; 
             ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         }
 
@@ -106,17 +105,16 @@ void HyprlandWatcher::runLoop(std::string socket_path) {
             while (true) {
                 auto nl = buf.find('\n', pos);
                 if (nl == std::string::npos) {
-                    // keep remainder
                     buf.erase(0, pos);
                     break;
                 }
                 std::string line = buf.substr(pos, nl - pos);
                 pos = nl + 1;
 
-                // Expect: "activewindow>>class,title"
+                // Protocol: "activewindow>>class,title"
                 if (line.rfind("activewindow>>", 0) == 0) {
                     std::string payload = line.substr(std::string("activewindow>>").size());
-                    // split by ',' first token is class
+                    
                     std::string appClass;
                     auto comma = payload.find(',');
                     if (comma != std::string::npos) {
@@ -124,13 +122,15 @@ void HyprlandWatcher::runLoop(std::string socket_path) {
                     } else {
                         appClass = payload;
                     }
+                    
                     if (appClass == last_class_) {
-                        continue; // no change
+                        continue; 
                     }
                     last_class_ = appClass;
                     if (on_class_) { on_class_(last_class_); }
-                    // Prefer profile-based mapping when available
-                    if (!cfg_.profile_enabled.empty()) {
+
+                    // --- Painter's Algorithm Logic ---
+                    if (!cfg_.profile_draw_order.empty()) {
                         std::string prof;
                         auto pit = cfg_.class_to_profile.find(appClass);
                         if (pit != cfg_.class_to_profile.end()) {
@@ -138,29 +138,31 @@ void HyprlandWatcher::runLoop(std::string socket_path) {
                         } else {
                             prof = cfg_.default_profile;
                         }
-                        auto eit = cfg_.profile_enabled.find(prof);
+
+                        auto oit = cfg_.profile_draw_order.find(prof);
                         auto mit = cfg_.profile_masks.find(prof);
-                        if (eit != cfg_.profile_enabled.end() && mit != cfg_.profile_masks.end()) {
-                            // Ensure sizes match preset_count_
-                            std::vector<bool> enabled = eit->second;
-                            enabled.resize(preset_count_, false);
-                            auto masks = mit->second;
+
+                        if (oit != cfg_.profile_draw_order.end() && mit != cfg_.profile_masks.end()) {
+                            // 1. Get the ordered playlist
+                            const std::vector<std::size_t>& draw_list = oit->second;
+                            
+                            // 2. Get the masks (ensure size safety)
+                            std::vector<std::vector<bool>> masks = mit->second;
                             if (masks.size() != preset_count_) {
-                                masks.assign(preset_count_, std::vector<bool>());
+                                masks.resize(preset_count_, std::vector<bool>());
                             }
+
+                            // 3. Apply to CLI -> Engine
                             cli_.applyPresetMasks(masks);
-                            cli_.applyPresetEnableSet(enabled);
+                            cli_.setDrawList(draw_list); // Calls the new Painter's Algo method
                             cli_.refreshRender();
                             continue;
                         }
                     }
-
-                    // No profile data available; skip applying changes.
                 }
             }
         }
         ::close(fd);
-        // reconnect delay
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 }

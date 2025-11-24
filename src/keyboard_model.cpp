@@ -1,6 +1,9 @@
 #include "keyboard_configurator/keyboard_model.hpp"
 
+#include <limits>
 #include <stdexcept>
+
+#include <linux/input-event-codes.h>
 
 #include "keyboard_configurator/key_color_frame.hpp"
 
@@ -52,6 +55,34 @@ std::optional<std::size_t> KeyboardModel::indexForKey(const std::string& label) 
         return std::nullopt;
     }
     return it->second;
+}
+
+std::optional<std::size_t> KeyboardModel::indexForKeycode(int keycode) const {
+    if (keycode < 0 || keycode >= static_cast<int>(keycode_to_index_.size())) {
+        return std::nullopt;
+    }
+    const auto idx = keycode_to_index_[static_cast<std::size_t>(keycode)];
+    if (idx == std::numeric_limits<std::size_t>::max()) {
+        return std::nullopt;
+    }
+    return idx;
+}
+
+void KeyboardModel::setKeycodeMap(const std::vector<int>& keycodes) {
+    if (keycode_to_index_.empty()) {
+        keycode_to_index_.assign(KEY_CNT, std::numeric_limits<std::size_t>::max());
+    } else {
+        std::fill(keycode_to_index_.begin(), keycode_to_index_.end(), std::numeric_limits<std::size_t>::max());
+    }
+
+    const auto limit = std::min(keycodes.size(), key_labels_.size());
+    for (std::size_t i = 0; i < limit; ++i) {
+        const int code = keycodes[i];
+        if (code < 0 || code >= KEY_CNT) {
+            continue;
+        }
+        keycode_to_index_[static_cast<std::size_t>(code)] = i;
+    }
 }
 
 std::vector<std::uint8_t> KeyboardModel::encodeFrame(const KeyColorFrame& frame) const {

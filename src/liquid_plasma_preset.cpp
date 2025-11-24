@@ -91,6 +91,31 @@ void LiquidPlasmaPreset::configure(const ParameterMap& params) {
             }
         }
     }
+    auto parseBool = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return value == "1" || value == "true" || value == "yes" || value == "on";
+    };
+    if (auto it = params.find("reactive"); it != params.end()) {
+        reactive_enabled_ = parseBool(it->second);
+    }
+    auto parseClamp = [&](const char* key, double& target, double min_v) {
+        if (auto it = params.find(key); it != params.end()) {
+            try {
+                double v = std::stod(it->second);
+                target = std::max(min_v, v);
+            } catch (...) {
+            }
+        }
+    };
+    parseClamp("reactive_history", reactive_history_, 0.05);
+    parseClamp("reactive_decay", reactive_decay_, 0.01);
+    parseClamp("reactive_spread", reactive_spread_, 0.005);
+    parseClamp("reactive_intensity", reactive_intensity_, 0.0);
+    if (auto it = params.find("reactive_color"); it != params.end()) {
+        reactive_color_ = parseHexColor(it->second);
+    }
 }
 
 void LiquidPlasmaPreset::buildCoords(const KeyboardModel& model) {
@@ -164,6 +189,66 @@ void LiquidPlasmaPreset::render(const KeyboardModel& model,
             c = hsvToRgb(hue, std::clamp(saturation_, 0.0, 1.0), std::clamp(value_, 0.0, 1.0));
         }
         frame.setColor(i, c);
+    }
+
+    applyReactiveOverlay(frame);
+}
+
+void LiquidPlasmaPreset::applyReactiveOverlay(KeyColorFrame& frame) {
+    if (!reactive_enabled_ || !provider_) {
+        return;
+    }
+    const auto total = frame.size();
+    if (xs_.size() != total || ys_.size() != total || !coords_built_) {
+        return;
+    }
+    const auto events = provider_->recentEvents(reactive_history_);
+    if (events.empty()) {
+        return;
+    }
+
+    std::vector<double> energy(total, 0.0);
+    const double spread = std::max(0.005, reactive_spread_);
+    const double sigma2 = 2.0 * spread * spread;
+    const double decay = std::max(0.01, reactive_decay_);
+    const double now = provider_->nowSeconds();
+
+    for (const auto& ev : events) {
+        if (ev.key_index >= xs_.size()) {
+            continue;
+        }
+        const double ex = xs_[ev.key_index];
+        const double ey = ys_[ev.key_index];
+        const double age = std::max(0.0, now - ev.time_seconds);
+        const double temporal = std::exp(-age / decay);
+        const double weight = ev.intensity * reactive_intensity_ * temporal;
+        if (weight <= 0.0) {
+            continue;
+        }
+        for (std::size_t k = 0; k < total; ++k) {
+            const double dx = xs_[k] - ex;
+            const double dy = ys_[k] - ey;
+            const double dist2 = dx * dx + dy * dy;
+            const double spatial = std::exp(-dist2 / sigma2);
+            energy[k] += weight * spatial;
+        }
+    }
+
+    auto lerpChannel = [](std::uint8_t base, std::uint8_t target, double t) {
+        t = std::clamp(t, 0.0, 1.0);
+        return static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(base + (target - base) * t)), 0, 255));
+    };
+
+    for (std::size_t k = 0; k < total; ++k) {
+        const double e = std::clamp(energy[k], 0.0, 1.0);
+        if (e <= 0.0) {
+            continue;
+        }
+        auto color = frame.color(k);
+        color.r = lerpChannel(color.r, reactive_color_.r, e);
+        color.g = lerpChannel(color.g, reactive_color_.g, e);
+        color.b = lerpChannel(color.b, reactive_color_.b, e);
+        frame.setColor(k, color);
     }
 }
 

@@ -106,6 +106,32 @@ void SmokePreset::configure(const ParameterMap& params) {
     if (auto it = params.find("contrast"); it != params.end()) contrast_ = std::max(0.0, std::stod(it->second));
     if (auto it = params.find("color_low"); it != params.end()) color_low_ = parseHexColor(it->second);
     if (auto it = params.find("color_high"); it != params.end()) color_high_ = parseHexColor(it->second);
+
+    auto parseBool = [](std::string v) {
+        std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return v == "1" || v == "true" || v == "yes" || v == "on";
+    };
+    if (auto it = params.find("reactive"); it != params.end()) {
+        reactive_enabled_ = parseBool(it->second);
+    }
+    auto parseClamp = [&](const char* key, double& target, double min_v) {
+        if (auto it = params.find(key); it != params.end()) {
+            try {
+                double val = std::stod(it->second);
+                target = std::max(min_v, val);
+            } catch (...) {
+            }
+        }
+    };
+    parseClamp("reactive_history", reactive_history_, 0.05);
+    parseClamp("reactive_decay", reactive_decay_, 0.01);
+    parseClamp("reactive_spread", reactive_spread_, 0.005);
+    parseClamp("reactive_intensity", reactive_intensity_, 0.0);
+    if (auto it = params.find("reactive_color"); it != params.end()) {
+        reactive_color_ = parseHexColor(it->second);
+    }
 }
 
 void SmokePreset::buildCoords(const KeyboardModel& model) {
@@ -160,6 +186,66 @@ void SmokePreset::render(const KeyboardModel& model,
         c.g = static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(color_low_.g * (1.0 - v) + color_high_.g * v)), 0, 255));
         c.b = static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(color_low_.b * (1.0 - v) + color_high_.b * v)), 0, 255));
         frame.setColor(i, c);
+    }
+
+    applyReactiveOverlay(frame);
+}
+
+void SmokePreset::applyReactiveOverlay(KeyColorFrame& frame) {
+    if (!reactive_enabled_ || !provider_ || !coords_built_) {
+        return;
+    }
+    const auto total = frame.size();
+    if (xs_.size() != total || ys_.size() != total) {
+        return;
+    }
+    const auto events = provider_->recentEvents(reactive_history_);
+    if (events.empty()) {
+        return;
+    }
+
+    const double spread = std::max(0.005, reactive_spread_);
+    const double sigma2 = 2.0 * spread * spread;
+    const double decay = std::max(0.01, reactive_decay_);
+    const double now = provider_->nowSeconds();
+
+    std::vector<double> overlay(total, 0.0);
+    for (const auto& ev : events) {
+        if (ev.key_index >= xs_.size()) {
+            continue;
+        }
+        const double ex = xs_[ev.key_index];
+        const double ey = ys_[ev.key_index];
+        const double age = std::max(0.0, now - ev.time_seconds);
+        const double temporal = std::exp(-age / decay);
+        const double weight = ev.intensity * reactive_intensity_ * temporal;
+        if (weight <= 0.0) {
+            continue;
+        }
+        for (std::size_t k = 0; k < total; ++k) {
+            const double dx = xs_[k] - ex;
+            const double dy = ys_[k] - ey;
+            const double dist2 = dx * dx + dy * dy;
+            const double spatial = std::exp(-dist2 / sigma2);
+            overlay[k] += weight * spatial;
+        }
+    }
+
+    auto blendChannel = [](std::uint8_t base, std::uint8_t highlight, double amount) {
+        amount = std::clamp(amount, 0.0, 1.0);
+        return static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(base + (highlight - base) * amount)), 0, 255));
+    };
+
+    for (std::size_t k = 0; k < total; ++k) {
+        const double amt = std::clamp(overlay[k], 0.0, 1.0);
+        if (amt <= 0.0) {
+            continue;
+        }
+        auto color = frame.color(k);
+        color.r = blendChannel(color.r, reactive_color_.r, amt);
+        color.g = blendChannel(color.g, reactive_color_.g, amt);
+        color.b = blendChannel(color.b, reactive_color_.b, amt);
+        frame.setColor(k, color);
     }
 }
 

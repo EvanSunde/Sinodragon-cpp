@@ -2,12 +2,12 @@
 
 #include <fcntl.h>
 #include <unistd.h>
-
 #include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <cerrno>
 #include <algorithm>
+#include <vector>
 
 #include <libevdev/libevdev.h>
 
@@ -17,18 +17,10 @@
 namespace kb::cfg {
 
 namespace {
-static inline bool is_ctrl(int code) {
-    return code == KEY_LEFTCTRL || code == KEY_RIGHTCTRL;
-}
-static inline bool is_shift(int code) {
-    return code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT;
-}
-static inline bool is_alt(int code) {
-    return code == KEY_LEFTALT || code == KEY_RIGHTALT;
-}
-static inline bool is_super(int code) {
-    return code == KEY_LEFTMETA || code == KEY_RIGHTMETA;
-}
+static inline bool is_ctrl(int code) { return code == KEY_LEFTCTRL || code == KEY_RIGHTCTRL; }
+static inline bool is_shift(int code) { return code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT; }
+static inline bool is_alt(int code) { return code == KEY_LEFTALT || code == KEY_RIGHTALT; }
+static inline bool is_super(int code) { return code == KEY_LEFTMETA || code == KEY_RIGHTMETA; }
 }
 
 ShortcutWatcher::ShortcutWatcher(const KeyboardModel& model,
@@ -36,11 +28,14 @@ ShortcutWatcher::ShortcutWatcher(const KeyboardModel& model,
                                  const HyprConfig& hypr,
                                  std::size_t key_count)
     : model_(model), cli_(cli), hypr_(hypr), key_count_(key_count) {
-    overlay_index_ = hypr_.shortcuts_overlay_preset_index;
-    // Compile shortcut profiles to key indices
+    
+    if (hypr_.shortcuts_overlay_preset_index >= 0) {
+        overlay_index_ = static_cast<std::size_t>(hypr_.shortcuts_overlay_preset_index);
+        overlay_valid_ = true;
+    }
+
     for (const auto& kv : hypr_.shortcuts) {
         CompiledProfile cp;
-        // For each combo, translate labels to indices
         for (const auto& ck : kv.second.combos) {
             int modmask = ck.first;
             std::vector<std::size_t> indices;
@@ -59,7 +54,7 @@ ShortcutWatcher::ShortcutWatcher(const KeyboardModel& model,
 ShortcutWatcher::~ShortcutWatcher() { stop(); }
 
 void ShortcutWatcher::start() {
-    if (overlay_index_ < 0) return; // disabled
+    if (!overlay_valid_) return;
     if (thread_.joinable()) return;
     stop_.store(false);
     openDevices();
@@ -77,7 +72,12 @@ void ShortcutWatcher::stop() {
 void ShortcutWatcher::setActiveClass(const std::string& klass) {
     active_class_ = klass;
     updateActiveShortcutFromClass();
-    // Re-apply current mods to update mask immediately
+    
+    // If we are NOT currently showing shortcuts, we might need to update the background profile immediately
+    // But usually HyprlandWatcher handles the normal switching.
+    // We only need to care if we ARE showing shortcuts, to ensure the "restore" target is correct.
+    
+    // Re-apply mods to ensure logic stays consistent
     applyMaskForMods(mods_.load());
 }
 
@@ -85,18 +85,20 @@ void ShortcutWatcher::openDevices() {
     devices_.clear();
     const std::filesystem::path by_path("/dev/input/by-path");
     std::error_code ec;
-    if (!std::filesystem::exists(by_path, ec)) {
-        return;
-    }
+    if (!std::filesystem::exists(by_path, ec)) return;
+    
     for (auto& entry : std::filesystem::directory_iterator(by_path, ec)) {
         if (ec) break;
         if (!entry.is_symlink(ec) && !entry.is_regular_file(ec)) continue;
         const auto name = entry.path().filename().string();
         if (name.find("-kbd") == std::string::npos) continue;
+        
         std::filesystem::path real = std::filesystem::read_symlink(entry.path(), ec);
         std::filesystem::path node = real.empty() ? entry.path() : (entry.path().parent_path() / real);
+        
         int fd = ::open(node.c_str(), O_RDONLY | O_NONBLOCK);
         if (fd < 0) continue;
+        
         libevdev* dev = nullptr;
         if (libevdev_new_from_fd(fd, &dev) != 0) {
             ::close(fd);
@@ -121,16 +123,13 @@ void ShortcutWatcher::closeDevices() {
 }
 
 void ShortcutWatcher::runLoop() {
-    // initial state
     updateActiveShortcutFromClass();
     applyMaskForMods(0);
 
-    // Non-blocking poll of devices for events
     while (!stop_.load()) {
         int combined = 0;
         for (auto& d : devices_) {
             if (!d.dev) continue;
-            // Drain all pending events
             while (true) {
                 input_event ev{};
                 int rc = libevdev_next_event(d.dev, LIBEVDEV_READ_FLAG_NORMAL, &ev);
@@ -146,9 +145,7 @@ void ShortcutWatcher::runLoop() {
                             if (ev.value) d.mask |= 8; else d.mask &= ~8;
                         }
                     }
-                } else if (rc == -EAGAIN) {
-                    break;
-                } else if (rc == LIBEVDEV_READ_STATUS_SYNC || rc == -EINTR) {
+                } else if (rc == -EAGAIN || rc == LIBEVDEV_READ_STATUS_SYNC || rc == -EINTR) {
                     break;
                 } else {
                     break;
@@ -165,26 +162,54 @@ void ShortcutWatcher::runLoop() {
 }
 
 void ShortcutWatcher::updateActiveShortcutFromClass() {
-    // Determine active shortcut profile name from class
     std::string name;
     auto it = hypr_.class_to_shortcut.find(active_class_);
     if (it != hypr_.class_to_shortcut.end()) name = it->second;
     if (name.empty()) name = hypr_.default_shortcut;
+    
     active_shortcut_name_ = name;
-    // Apply color if configured
-    if (overlay_index_ >= 0) {
+    
+    // If overlay currently active, update its color immediately
+    if (overlay_valid_ && engaged_) {
         auto sit = hypr_.shortcuts.find(active_shortcut_name_);
         if (sit != hypr_.shortcuts.end() && !sit->second.color.empty()) {
-            cli_.applyPresetParameter(static_cast<std::size_t>(overlay_index_), "color", sit->second.color);
+            cli_.applyPresetParameter(overlay_index_, "color", sit->second.color);
         }
     }
 }
 
+// --- Helper to restore state based on Active Window ---
+void ShortcutWatcher::restoreActiveProfile() {
+    // 1. Determine which profile SHOULD be active
+    std::string prof = hypr_.default_profile;
+    auto pit = hypr_.class_to_profile.find(active_class_);
+    if (pit != hypr_.class_to_profile.end()) {
+        prof = pit->second;
+    }
+
+    // 2. Look up the Draw List & Masks for that profile
+    // (This logic mirrors HyprlandWatcher)
+    auto oit = hypr_.profile_draw_order.find(prof);
+    auto mit = hypr_.profile_masks.find(prof);
+
+    if (oit != hypr_.profile_draw_order.end() && mit != hypr_.profile_masks.end()) {
+        // 3. Apply them
+        cli_.applyPresetMasks(mit->second);
+        cli_.setDrawList(oit->second);
+    } else {
+        // Fallback: If profile missing, maybe clear everything?
+        cli_.setDrawList({});
+    }
+    cli_.refreshRender();
+}
+
 void ShortcutWatcher::applyMaskForMods(int modmask) {
-    if (overlay_index_ < 0) return;
-    // Build mask for current mods
+    if (!overlay_valid_) return;
+
+    // Calculate mask based on active shortcut profile + mods
     std::vector<bool> mask(key_count_, false);
     std::string used_profile;
+    
     auto build_from = [&](const std::string& pname) -> bool {
         if (pname.empty()) return false;
         auto it = compiled_.find(pname);
@@ -197,6 +222,7 @@ void ShortcutWatcher::applyMaskForMods(int modmask) {
         used_profile = pname;
         return true;
     };
+    
     bool found = build_from(active_shortcut_name_);
     if (!found && hypr_.default_shortcut != active_shortcut_name_) {
         found = build_from(hypr_.default_shortcut);
@@ -205,42 +231,37 @@ void ShortcutWatcher::applyMaskForMods(int modmask) {
     const bool has_any = std::any_of(mask.begin(), mask.end(), [](bool b){ return b; });
 
     if (modmask != 0 && has_any) {
-        // Engage exclusive overlay mode: enable only overlay preset
+        // === ENGAGE SHORTCUTS ===
         if (!engaged_) {
-            saved_enabled_ = cli_.getPresetEnabledSet();
-            std::vector<bool> only_overlay = saved_enabled_;
-            if (only_overlay.empty()) {
-                // Query again in case
-                only_overlay = cli_.getPresetEnabledSet();
-            }
-        
-            only_overlay.assign(only_overlay.size(), false);
-            if (overlay_index_ >= 0 && static_cast<std::size_t>(overlay_index_) < only_overlay.size()) {
-                only_overlay[static_cast<std::size_t>(overlay_index_)] = true;
-            }
-            cli_.applyPresetEnableSet(only_overlay);
+            // Force DrawList to ONLY be the overlay preset
+            std::vector<std::size_t> overlay_only = { overlay_index_ };
+            cli_.setDrawList(overlay_only);
             engaged_ = true;
         }
-        // Apply color from the used profile if present
+
+        // Update Color if needed
         if (!used_profile.empty()) {
             auto sit = hypr_.shortcuts.find(used_profile);
             if (sit != hypr_.shortcuts.end() && !sit->second.color.empty()) {
-                cli_.applyPresetParameter(static_cast<std::size_t>(overlay_index_), "color", sit->second.color);
+                cli_.applyPresetParameter(overlay_index_, "color", sit->second.color);
             }
         }
-        cli_.applyPresetMask(static_cast<std::size_t>(overlay_index_), mask);
+        
+        // Update Mask (Show specific keys)
+        cli_.applyPresetMask(overlay_index_, mask);
         cli_.refreshRender();
+        
     } else {
-        // Disengage: clear mask and restore enabled set
-        cli_.applyPresetMask(static_cast<std::size_t>(overlay_index_), std::vector<bool>(key_count_, false));
+        // === DISENGAGE (RESTORE) ===
         if (engaged_) {
-            if (!saved_enabled_.empty()) {
-                cli_.applyPresetEnableSet(saved_enabled_);
-            }
+            // Instead of restoring a saved list, we recalculate the correct list
+            // for the current active window.
+            restoreActiveProfile();
+            
+            // Clean up overlay state
+            cli_.applyPresetMask(overlay_index_, std::vector<bool>(key_count_, false));
             engaged_ = false;
-            saved_enabled_.clear();
         }
-        cli_.refreshRender();
     }
 }
 
