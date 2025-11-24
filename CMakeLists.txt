@@ -1,25 +1,32 @@
 cmake_minimum_required(VERSION 3.16)
 project(keyboard_configurator LANGUAGES CXX)
 
+# --- Dependencies ---
 find_package(hidapi REQUIRED)
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
     pkg_check_modules(LIBEVDEV REQUIRED IMPORTED_TARGET libevdev)
 endif()
 
+# 1. FIND TOML++ (System Package)
+find_package(tomlplusplus CONFIG REQUIRED)
+
+# Determine HIDAPI target
 set(HIDAPI_TARGET "")
 if(TARGET hidapi::hidapi)
     set(HIDAPI_TARGET hidapi::hidapi)
 elseif(TARGET hidapi::hidapi-hidraw)
     set(HIDAPI_TARGET hidapi::hidapi-hidraw)
 else()
-    message(FATAL_ERROR "hidapi target not found. Ensure hidapi is available to CMake.")
+    message(FATAL_ERROR "hidapi target not found.")
 endif()
 
+# --- Compiler Settings ---
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# --- Main Library ---
 add_library(keyboard_configurator STATIC
     src/keyboard_model.cpp
     src/key_color_frame.cpp
@@ -53,6 +60,8 @@ target_link_libraries(keyboard_configurator
     PUBLIC
         ${HIDAPI_TARGET}
         $<IF:$<TARGET_EXISTS:PkgConfig::LIBEVDEV>,PkgConfig::LIBEVDEV,>
+        # 2. LINK TOML++ (This automatically handles include paths)
+        tomlplusplus::tomlplusplus
 )
 
 # Fallback if pkg-config is not available
@@ -61,7 +70,7 @@ if(NOT TARGET PkgConfig::LIBEVDEV)
     if(LIBEVDEV_LIB)
         target_link_libraries(keyboard_configurator PUBLIC ${LIBEVDEV_LIB})
     else()
-        message(FATAL_ERROR "libevdev not found. Please install libevdev or provide pkg-config libevdev.")
+        message(FATAL_ERROR "libevdev not found.")
     endif()
 endif()
 
