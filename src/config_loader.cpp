@@ -1,6 +1,6 @@
 #include "keyboard_configurator/config_loader.hpp"
 
-// Use the system package include path
+// Use the system package or local include path
 #define TOML_EXCEPTIONS 1
 #include <toml++/toml.hpp>
 
@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <memory>
 
 // Required for keycode parsing
 #include <libevdev/libevdev.h>
@@ -58,7 +59,7 @@ std::string tomlToString(const toml::node& node) {
     return "";
 }
 
-// --- Helper: Layout Parsing (Restored) ---
+// --- Helper: Layout Parsing ---
 KeyboardModel::Layout readLayout(const std::filesystem::path& path) {
     std::ifstream in(path);
     if (!in) {
@@ -95,7 +96,7 @@ KeyboardModel::Layout readLayout(const std::filesystem::path& path) {
     return layout;
 }
 
-// --- Helper: Keycode Parsing (Restored) ---
+// --- Helper: Keycode Parsing ---
 int parseKeycodeToken(const std::string& raw) {
     std::string token = trim(raw);
     if (token.empty()) return -1;
@@ -146,10 +147,27 @@ std::vector<int> readKeycodeCsv(const std::filesystem::path& path,
     return out;
 }
 
+// --- Helper: Transport Factory ---
 std::unique_ptr<DeviceTransport> createTransport(const std::string& id) {
     if (id == "logging") return std::make_unique<LoggingTransport>();
     if (id == "hidapi") return std::make_unique<HidapiTransport>();
     throw std::runtime_error("Unsupported transport: " + id);
+}
+
+// --- Helper: Parse Modifiers ---
+int parseModifierMask(const std::string& key) {
+    int mask = 0;
+    std::string token;
+    std::istringstream iss(key);
+    while (std::getline(iss, token, '_')) {
+        std::string t = trim(token);
+        std::transform(t.begin(), t.end(), t.begin(), ::tolower);
+        if (t == "ctrl" || t == "control") mask |= 1;
+        else if (t == "shift") mask |= 2;
+        else if (t == "alt") mask |= 4;
+        else if (t == "super" || t == "win" || t == "meta") mask |= 8;
+    }
+    return mask;
 }
 
 } // namespace
@@ -160,7 +178,6 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     const auto file_path = std::filesystem::absolute(path);
     const auto root_dir = file_path.parent_path();
 
-    // 1. Parse TOML
     toml::table tbl;
     try {
         tbl = toml::parse_file(path);
@@ -168,7 +185,6 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         throw std::runtime_error("TOML Parse Error: " + std::string(err.description()));
     }
 
-    // 2. Load Device Settings
     auto device = tbl["device"];
     if (!device) throw std::runtime_error("Missing [device] section");
 
@@ -176,7 +192,6 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     uint16_t vid = device["vendor_id"].value_or(0);
     uint16_t pid = device["product_id"].value_or(0);
     
-    // Handle Header Array
     std::vector<uint8_t> header;
     if (auto arr = device["packet_header"].as_array()) {
         for (auto& byte : *arr) header.push_back(static_cast<uint8_t>(byte.value_or(0)));
@@ -189,23 +204,23 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     std::filesystem::path layout_path = root_dir / device["layout"].value_or("");
     std::filesystem::path keycodes_path = root_dir / device["keycodes"].value_or("");
 
-    // 3. Construct RuntimeConfig (Device Model)
+    // Load Helpers
     auto layout = readLayout(layout_path); 
     
     RuntimeConfig config{
         KeyboardModel(name, vid, pid, header, pkt_len, layout, std::nullopt, std::nullopt),
         createTransport(transport),
-        {}, {}, // presets, params
+        {}, {}, 
         std::chrono::milliseconds(fps),
         std::nullopt, std::nullopt,
-        {}, {}  // masks, enabled
+        {}, {} 
     };
 
     if (std::filesystem::exists(keycodes_path)) {
          config.model.setKeycodeMap(readKeycodeCsv(keycodes_path, layout));
     }
 
-    // 4. Load Zones (Global)
+    // Load Zones
     std::unordered_map<std::string, std::vector<std::string>> zone_map;
     if (auto zones = tbl["zones"].as_table()) {
         for (auto& [key, val] : *zones) {
@@ -215,112 +230,141 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         }
     }
 
-    // 5. Load Presets
-    // We need to map TOML "names" to Vector Indices for profiles later
+    // Load Presets
     std::map<std::string, size_t> preset_name_to_index;
-    
     if (auto presets = tbl["presets"].as_table()) {
         for (auto& [name, node] : *presets) {
             if (auto ptable = node.as_table()) {
                 std::string id_str(name.str());
                 std::string type = (*ptable)["type"].value_or("static_color");
-                
-                // Create Param Map from TOML Table
                 ParameterMap params;
                 for (auto& [pkey, pval] : *ptable) {
-                    if (pkey.str() == "type") continue; // Don't pass 'type' as param
+                    if (pkey.str() == "type") continue; 
                     params[std::string(pkey.str())] = tomlToString(pval);
                 }
-
-                // Instantiate
                 auto preset = registry_.create(type);
                 if (preset) {
                     preset->configure(params);
                     config.presets.push_back(std::move(preset));
                     config.preset_parameters.push_back(params);
-                    
-                    // Map Name -> Index
                     preset_name_to_index[id_str] = config.presets.size() - 1;
                 }
             }
         }
     }
 
-    // Init global masks (Default: All Enabled)
+    // Init Global Masks
     size_t kc = config.model.keyCount();
     size_t pc = config.presets.size();
     config.preset_masks.assign(pc, std::vector<bool>(kc, true));
-    config.preset_enabled.assign(pc, false); // Default off until profile enables them
+    config.preset_enabled.assign(pc, false);
 
-    // 6. Load Hypr/Profiles
-    if (auto profiles = tbl["profiles"].as_table()) {
+    // Load Hypr/Profiles
+    if (auto hypr_node = tbl["hypr"]) {
         HyprConfig hcfg;
-        hcfg.enabled = true;
+        hcfg.enabled = hypr_node["enabled"].value_or(false);
         
-        // Default Configs
+        // Resolve Overlay Name to Index
+        std::string overlay_name = hypr_node["shortcuts_overlay_preset"].value_or("");
+        if (!overlay_name.empty() && preset_name_to_index.count(overlay_name)) {
+            hcfg.shortcuts_overlay_preset_index = static_cast<int>(preset_name_to_index[overlay_name]);
+        } else {
+            if (!overlay_name.empty()) std::cerr << "Warning: Shortcut overlay preset '" << overlay_name << "' not found.\n";
+            hcfg.shortcuts_overlay_preset_index = -1;
+        }
+
         if (auto apps = tbl["apps"].as_table()) {
             hcfg.default_profile = (*apps)["default_profile"].value_or("default");
+            hcfg.default_shortcut = (*apps)["default_shortcut"].value_or("default");
             if (auto maps = (*apps)["mappings"].as_table()) {
                  for (auto& [cls, prof] : *maps) {
-                     hcfg.class_to_profile[std::string(cls.str())] = prof.value_or("");
+                     // Check if it's a simple string or a table
+                     if (auto prof_str = prof.as_string()) {
+                        hcfg.class_to_profile[std::string(cls.str())] = prof_str->get();
+                     } else if (auto prof_tbl = prof.as_table()) {
+                         // Handle table format: "zen" = { shortcut = "zen" }
+                         if (auto s = prof_tbl->get("shortcut")) {
+                             hcfg.class_to_shortcut[std::string(cls.str())] = s->value_or("");
+                         }
+                         if (auto p = prof_tbl->get("profile")) {
+                             hcfg.class_to_profile[std::string(cls.str())] = p->value_or("");
+                         }
+                     }
                  }
             }
         }
 
-        // Process Each Profile
-        for (auto& [prof_name, prof_node] : *profiles) {
-            std::string profile_id(prof_name.str());
-            
-            // Start with blank state for this profile
-            std::vector<std::vector<bool>> profile_masks(pc, std::vector<bool>(kc, true));
-            std::vector<bool> profile_enabled(pc, false);
+        // Load Profiles (Draw Order)
+        if (auto profiles = tbl["profiles"].as_table()) {
+            for (auto& [prof_name, prof_node] : *profiles) {
+                std::string profile_id(prof_name.str());
+                std::vector<std::size_t> draw_order;
+                std::vector<std::vector<bool>> masks(pc, std::vector<bool>(kc, true));
 
-            if (auto layers = prof_node.as_table()->get("layers")->as_array()) {
-                for (auto& layer_node : *layers) {
-                    // Which preset is this?
-                    std::string p_ref = layer_node.as_table()->get("preset")->value_or("");
-                    if (preset_name_to_index.find(p_ref) == preset_name_to_index.end()) continue;
-                    
-                    size_t p_idx = preset_name_to_index[p_ref];
-                    profile_enabled[p_idx] = true;
+                if (auto layers = prof_node.as_table()->get("layers")->as_array()) {
+                    for (auto& layer_node : *layers) {
+                        std::string p_ref = layer_node.as_table()->get("preset")->value_or("");
+                        if (preset_name_to_index.find(p_ref) == preset_name_to_index.end()) continue;
+                        
+                        size_t p_idx = preset_name_to_index[p_ref];
+                        draw_order.push_back(p_idx);
 
-                    // Handle Zone/Key overrides
-                    bool has_override = false;
-                    std::vector<bool> mask(kc, false); // Default empty if overriding
-
-                    // Zones
-                    if (auto z = layer_node.as_table()->get("zones")) {
-                        has_override = true;
-                        if (auto zarr = z->as_array()) {
-                            for (auto& zn : *zarr) {
-                                std::string zname = zn.value_or("");
-                                if (zone_map.count(zname)) {
-                                    for(const auto& klabel : zone_map[zname]) {
-                                         if(auto idx = config.model.indexForKey(klabel)) mask[*idx] = true;
+                        // Handle Mask Overrides
+                        if (layer_node.as_table()->contains("zones") || layer_node.as_table()->contains("keys")) {
+                            std::fill(masks[p_idx].begin(), masks[p_idx].end(), false); // Reset mask to empty
+                            
+                            if (auto z = layer_node.as_table()->get("zones")) {
+                                if (auto zarr = z->as_array()) {
+                                    for (auto& zn : *zarr) {
+                                        std::string zname = zn.value_or("");
+                                        if (zone_map.count(zname)) {
+                                            for(const auto& klabel : zone_map[zname]) {
+                                                 if(auto idx = config.model.indexForKey(klabel)) masks[p_idx][*idx] = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (auto k = layer_node.as_table()->get("keys")) {
+                                 if (auto karr = k->as_array()) {
+                                    for (auto& kn : *karr) {
+                                        if(auto idx = config.model.indexForKey(kn.value_or(""))) masks[p_idx][*idx] = true;
                                     }
                                 }
                             }
                         }
                     }
-                    
-                    // Keys
-                    if (auto k = layer_node.as_table()->get("keys")) {
-                        has_override = true;
-                         if (auto karr = k->as_array()) {
-                            for (auto& kn : *karr) {
-                                if(auto idx = config.model.indexForKey(kn.value_or(""))) mask[*idx] = true;
-                            }
-                        }
-                    }
+                }
+                hcfg.profile_draw_order[profile_id] = draw_order;
+                hcfg.profile_masks[profile_id] = masks;
+            }
+        }
 
-                    if (has_override) {
-                        profile_masks[p_idx] = mask;
+        // Load Shortcuts Definitions
+        if (auto shortcuts = tbl["shortcuts"].as_table()) {
+            for (auto& [sc_name, sc_node] : *shortcuts) {
+                std::string id(sc_name.str());
+                ShortcutProfileConfig sc_cfg;
+                
+                if (auto tbl = sc_node.as_table()) {
+                    sc_cfg.color = (*tbl)["color"].value_or("");
+                    
+                    for (auto& [mod_key, keys_node] : *tbl) {
+                        std::string mod_str(mod_key.str());
+                        if (mod_str == "color") continue;
+                        
+                        int mask = parseModifierMask(mod_str);
+                        std::vector<std::string> key_list;
+                        if (auto arr = keys_node.as_array()) {
+                            for (auto& k : *arr) key_list.push_back(k.value_or(""));
+                        }
+                        sc_cfg.combos[mask] = key_list;
                     }
                 }
+                hcfg.shortcuts[id] = std::move(sc_cfg);
             }
-            hcfg.profile_masks[profile_id] = profile_masks;
-            hcfg.profile_enabled[profile_id] = profile_enabled;
         }
+
         config.hypr = std::move(hcfg);
     }
 

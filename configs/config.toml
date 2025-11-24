@@ -38,6 +38,11 @@ nav_cluster = ["PgUp", "PgDn", "Home", "End", "Insert", "Del", "Backspace", "F5"
 # ----------------------------------------------------------------
 
 # --- Static Bases ---
+
+[presets.shortcut_base_pink]
+type = "static_color"
+color = "#ff0e82"
+
 [presets.base_yellow] # Old: 0
 type = "static_color"
 color = "#FFFF40"

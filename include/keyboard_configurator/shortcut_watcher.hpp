@@ -7,7 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
-struct libevdev; // forward declaration
+// Forward declaration for the input library struct
+struct libevdev;
 
 #include "keyboard_configurator/config_loader.hpp"
 
@@ -36,40 +37,47 @@ private:
     const HyprConfig hypr_;
     std::size_t key_count_;
 
+    // Overlay Configuration
+    std::size_t overlay_index_{0};
+    bool overlay_valid_{false};
+
+    // Pre-compiled mapping of Shortcuts: [ModifierMask -> [KeyIndices...]]
     struct CompiledProfile {
-        // modifier mask -> key indices
         std::unordered_map<int, std::vector<std::size_t>> combos;
     };
-
     std::unordered_map<std::string, CompiledProfile> compiled_;
 
+    // Threading
     std::atomic<bool> stop_{false};
     std::thread thread_;
 
     // State
     std::string active_class_;
     std::string active_shortcut_name_;
-    int overlay_index_ {-1};
-
-    // current modifier state bits: 1=CTRL,2=SHIFT,4=ALT,8=SUPER
+    
+    // Modifiers state: 1=CTRL, 2=SHIFT, 4=ALT, 8=SUPER
     std::atomic<int> mods_{0};
     bool engaged_{false};
-    std::vector<bool> saved_enabled_;
 
-    // device handles
-    struct DevHandle {
+    // Input Devices
+    struct Device {
         int fd{-1};
         struct libevdev* dev{nullptr};
         int mask{0};
     };
-    std::vector<DevHandle> devices_;
+    std::vector<Device> devices_;
 
+    // Internal Helper Methods
     void runLoop();
     void openDevices();
     void closeDevices();
 
     void updateActiveShortcutFromClass();
     void applyMaskForMods(int modmask);
+    
+    // NEW: Restores the background profile based on the active window
+    // (Used when releasing Ctrl to switch back to the correct "Painter's List")
+    void restoreActiveProfile();
 };
 
 } // namespace kb::cfg

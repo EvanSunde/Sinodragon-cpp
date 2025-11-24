@@ -45,7 +45,8 @@ void ConfiguratorCLI::printPresets() {
     std::cout << "Presets:" << '\n';
     for (std::size_t i = 0; i < count; ++i) {
         const auto& preset = engine_.presetAt(i);
-        const bool enabled = engine_.presetEnabled(i);
+        // Note: We still use presetEnabled here for the 'toggle' command display
+        const bool enabled = engine_.presetEnabled(i); 
         std::cout << "  [" << i << "] " << preset.id()
                   << (enabled ? " (on" : " (off");
         if (preset.isAnimated()) {
@@ -149,7 +150,6 @@ void ConfiguratorCLI::syncRenderState(bool refresh_static_frame) {
     const bool animated = engineHasAnimated();
     if (animated) {
         if (!loop_running_.load()) {
-            renderOnce(0.0);
             startRenderLoop();
         }
     } else {
@@ -221,19 +221,11 @@ void ConfiguratorCLI::run() {
     std::cout << "Exiting configurator" << '\n';
 }
 
-void ConfiguratorCLI::applyPresetEnable(std::size_t index, bool enabled) {
-    std::lock_guard<std::mutex> guard(engine_mutex_);
-    if (index < engine_.presetCount()) {
-        engine_.setPresetEnabled(index, enabled);
-    }
-}
+// --- WATCHER INTERFACE ---
 
-void ConfiguratorCLI::applyPresetEnableSet(const std::vector<bool>& enabled) {
+void ConfiguratorCLI::setDrawList(const std::vector<std::size_t>& list) {
     std::lock_guard<std::mutex> guard(engine_mutex_);
-    const auto count = engine_.presetCount();
-    for (std::size_t i = 0; i < count && i < enabled.size(); ++i) {
-        engine_.setPresetEnabled(i, enabled[i]);
-    }
+    engine_.setDrawList(list);
 }
 
 void ConfiguratorCLI::applyPresetMasks(const std::vector<std::vector<bool>>& masks) {
@@ -255,24 +247,16 @@ void ConfiguratorCLI::applyPresetMask(std::size_t index, const std::vector<bool>
 void ConfiguratorCLI::applyPresetParameter(std::size_t index, const std::string& key, const std::string& value) {
     std::lock_guard<std::mutex> guard(engine_mutex_);
     if (index >= engine_.presetCount()) return;
+    
     if (index >= preset_parameters_.size()) {
         preset_parameters_.resize(engine_.presetCount());
     }
-    preset_parameters_[index][key] = value;
-    auto& preset = engine_.presetAt(index);
-    preset.configure(preset_parameters_[index]);
-}
-
-std::vector<bool> ConfiguratorCLI::getPresetEnabledSet() const {
-    std::lock_guard<std::mutex> guard(engine_mutex_);
-    const auto count = engine_.presetCount();
-    std::vector<bool> out(count, false);
-    for (std::size_t i = 0; i < count; ++i) {
-        out[i] = engine_.presetEnabled(i);
+    
+    if (preset_parameters_[index][key] != value) {
+        preset_parameters_[index][key] = value;
+        auto& preset = engine_.presetAt(index);
+        preset.configure(preset_parameters_[index]);
     }
-    return out;
 }
 
 }  // namespace kb::cfg
-
-
