@@ -9,11 +9,13 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
-#include <memory>
 
 // Required for keycode parsing
 #include <libevdev/libevdev.h>
@@ -210,15 +212,17 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     RuntimeConfig config{
         KeyboardModel(name, vid, pid, header, pkt_len, layout, std::nullopt, std::nullopt),
         createTransport(transport),
-        {}, {}, 
+        {}, {},
         std::chrono::milliseconds(fps),
         std::nullopt, std::nullopt,
-        {}, {} 
+        {}, {}
     };
 
     if (std::filesystem::exists(keycodes_path)) {
          config.model.setKeycodeMap(readKeycodeCsv(keycodes_path, layout));
     }
+
+    const std::size_t key_count = config.model.keyCount();
 
     // Load Zones
     std::unordered_map<std::string, std::vector<std::string>> zone_map;
@@ -230,47 +234,49 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         }
     }
 
-    // Load Presets
-    std::map<std::string, size_t> preset_name_to_index;
-    if (auto presets = tbl["presets"].as_table()) {
-        for (auto& [name, node] : *presets) {
-            if (auto ptable = node.as_table()) {
-                std::string id_str(name.str());
-                std::string type = (*ptable)["type"].value_or("static_color");
-                ParameterMap params;
-                for (auto& [pkey, pval] : *ptable) {
-                    if (pkey.str() == "type") continue; 
-                    params[std::string(pkey.str())] = tomlToString(pval);
-                }
-                auto preset = registry_.create(type);
-                if (preset) {
-                    preset->configure(params);
-                    config.presets.push_back(std::move(preset));
-                    config.preset_parameters.push_back(params);
-                    preset_name_to_index[id_str] = config.presets.size() - 1;
-                }
-            }
+    auto createPreset = [&](const std::string& type,
+                            ParameterMap params) -> std::optional<std::size_t> {
+        auto preset = registry_.create(type);
+        if (!preset) {
+            std::cerr << "Warning: Unknown preset type '" << type << "'.\n";
+            return std::nullopt;
         }
-    }
-
-    // Init Global Masks
-    size_t kc = config.model.keyCount();
-    size_t pc = config.presets.size();
-    config.preset_masks.assign(pc, std::vector<bool>(kc, true));
-    config.preset_enabled.assign(pc, false);
+        preset->configure(params);
+        config.presets.push_back(std::move(preset));
+        config.preset_parameters.push_back(std::move(params));
+        config.preset_masks.emplace_back(key_count, true);
+        config.preset_enabled.push_back(false);
+        return config.presets.size() - 1;
+    };
 
     // Load Hypr/Profiles
     if (auto hypr_node = tbl["hypr"]) {
         HyprConfig hcfg;
         hcfg.enabled = hypr_node["enabled"].value_or(false);
         
-        // Resolve Overlay Name to Index
-        std::string overlay_name = hypr_node["shortcuts_overlay_preset"].value_or("");
-        if (!overlay_name.empty() && preset_name_to_index.count(overlay_name)) {
-            hcfg.shortcuts_overlay_preset_index = static_cast<int>(preset_name_to_index[overlay_name]);
-        } else {
-            if (!overlay_name.empty()) std::cerr << "Warning: Shortcut overlay preset '" << overlay_name << "' not found.\n";
-            hcfg.shortcuts_overlay_preset_index = -1;
+        auto growProfileMasks = [&](std::size_t idx) {
+            for (auto& [_, masks] : hcfg.profile_masks) {
+                if (masks.size() <= idx) {
+                    masks.resize(idx + 1, std::vector<bool>(key_count, true));
+                }
+            }
+        };
+
+        hcfg.shortcuts_overlay_preset_index = -1;
+        if (auto overlay_tbl = hypr_node["shortcuts_overlay_effect"].as_table()) {
+            std::string overlay_type = "static_color";
+            if (auto type_node = overlay_tbl->get("type")) {
+                overlay_type = type_node->value_or("static_color");
+            }
+            ParameterMap overlay_params;
+            for (auto& [k, v] : *overlay_tbl) {
+                if (k.str() == "type") continue;
+                overlay_params[std::string(k.str())] = tomlToString(v);
+            }
+            if (auto overlay_idx = createPreset(overlay_type, std::move(overlay_params))) {
+                growProfileMasks(*overlay_idx);
+                hcfg.shortcuts_overlay_preset_index = static_cast<int>(*overlay_idx);
+            }
         }
 
         if (auto apps = tbl["apps"].as_table()) {
@@ -298,45 +304,113 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         if (auto profiles = tbl["profiles"].as_table()) {
             for (auto& [prof_name, prof_node] : *profiles) {
                 std::string profile_id(prof_name.str());
-                std::vector<std::size_t> draw_order;
-                std::vector<std::vector<bool>> masks(pc, std::vector<bool>(kc, true));
+                auto& draw_order = hcfg.profile_draw_order[profile_id];
+                auto& profile_masks = hcfg.profile_masks[profile_id];
 
-                if (auto layers = prof_node.as_table()->get("layers")->as_array()) {
-                    for (auto& layer_node : *layers) {
-                        std::string p_ref = layer_node.as_table()->get("preset")->value_or("");
-                        if (preset_name_to_index.find(p_ref) == preset_name_to_index.end()) continue;
-                        
-                        size_t p_idx = preset_name_to_index[p_ref];
-                        draw_order.push_back(p_idx);
+                auto applyZoneMask = [&](std::size_t target_idx, const toml::array& zones) {
+                    for (auto& zn : zones) {
+                        std::string zname = zn.value_or("");
+                        auto zit = zone_map.find(zname);
+                        if (zit == zone_map.end()) continue;
+                        for (const auto& klabel : zit->second) {
+                            if (auto idx = config.model.indexForKey(klabel)) {
+                                profile_masks[target_idx][*idx] = true;
+                            }
+                        }
+                    }
+                };
 
-                        // Handle Mask Overrides
-                        if (layer_node.as_table()->contains("zones") || layer_node.as_table()->contains("keys")) {
-                            std::fill(masks[p_idx].begin(), masks[p_idx].end(), false); // Reset mask to empty
-                            
-                            if (auto z = layer_node.as_table()->get("zones")) {
-                                if (auto zarr = z->as_array()) {
-                                    for (auto& zn : *zarr) {
-                                        std::string zname = zn.value_or("");
-                                        if (zone_map.count(zname)) {
-                                            for(const auto& klabel : zone_map[zname]) {
-                                                 if(auto idx = config.model.indexForKey(klabel)) masks[p_idx][*idx] = true;
-                                            }
+                auto applyKeyMask = [&](std::size_t target_idx, const toml::array& keys) {
+                    for (auto& kn : keys) {
+                        if (auto idx = config.model.indexForKey(kn.value_or(""))) {
+                            profile_masks[target_idx][*idx] = true;
+                        }
+                    }
+                };
+
+                auto parseInlineEffect = [&](const toml::table& layer_tbl)
+                        -> std::optional<std::pair<std::string, ParameterMap>> {
+                    const toml::table* effect_tbl = nullptr;
+                    bool effect_is_layer = false;
+                    if (auto effect_node = layer_tbl.get("effect")) {
+                        effect_tbl = effect_node->as_table();
+                    } else if (layer_tbl.contains("type")) {
+                        effect_tbl = &layer_tbl;
+                        effect_is_layer = true;
+                    }
+                    if (!effect_tbl) {
+                        return std::nullopt;
+                    }
+
+                    std::string type = "static_color";
+                    if (auto type_node = effect_tbl->get("type")) {
+                        type = type_node->value_or("static_color");
+                    }
+                    ParameterMap params;
+                    for (auto& [ekey, eval] : *effect_tbl) {
+                        std::string key = std::string(ekey.str());
+                        if (key == "type" || key == "name") continue;
+                        if (effect_is_layer && (key == "zones" || key == "keys" || key == "effect")) {
+                            continue;
+                        }
+                        params[key] = tomlToString(eval);
+                    }
+                    return std::make_pair(type, std::move(params));
+                };
+
+                if (auto layers_node = prof_node.as_table()->get("layers")) {
+                    if (auto layers = layers_node->as_array()) {
+                        for (auto& layer_node : *layers) {
+                            const toml::table* layer_tbl = layer_node.as_table();
+                            if (!layer_tbl) continue;
+
+                            auto inline_effect = parseInlineEffect(*layer_tbl);
+                            if (!inline_effect) {
+                                std::cerr << "Warning: Profile '" << profile_id << "' has layer without effect definition.\n";
+                                continue;
+                            }
+
+                            auto preset_idx_opt = createPreset(inline_effect->first, std::move(inline_effect->second));
+                            if (!preset_idx_opt) {
+                                continue;
+                            }
+
+                            std::size_t preset_idx = *preset_idx_opt;
+                            growProfileMasks(preset_idx);
+                            draw_order.push_back(preset_idx);
+
+                            if (profile_masks.size() <= preset_idx) {
+                                profile_masks.resize(preset_idx + 1, std::vector<bool>(key_count, true));
+                            }
+
+                            auto& mask = profile_masks[preset_idx];
+                            mask.assign(key_count, true);
+
+                            bool has_zones = layer_tbl->contains("zones");
+                            bool has_keys = layer_tbl->contains("keys");
+
+                            if (has_zones || has_keys) {
+                                std::fill(mask.begin(), mask.end(), false);
+
+                                if (has_zones) {
+                                    if (auto zones = layer_tbl->get("zones")) {
+                                        if (auto zarr = zones->as_array()) {
+                                            applyZoneMask(preset_idx, *zarr);
                                         }
                                     }
                                 }
-                            }
-                            if (auto k = layer_node.as_table()->get("keys")) {
-                                 if (auto karr = k->as_array()) {
-                                    for (auto& kn : *karr) {
-                                        if(auto idx = config.model.indexForKey(kn.value_or(""))) masks[p_idx][*idx] = true;
+
+                                if (has_keys) {
+                                    if (auto keys = layer_tbl->get("keys")) {
+                                        if (auto karr = keys->as_array()) {
+                                            applyKeyMask(preset_idx, *karr);
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                hcfg.profile_draw_order[profile_id] = draw_order;
-                hcfg.profile_masks[profile_id] = masks;
             }
         }
 
