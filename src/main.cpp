@@ -5,43 +5,46 @@
 #include "keyboard_configurator/configurator_cli.hpp"
 #include "keyboard_configurator/effect_engine.hpp"
 
+#include "keyboard_configurator/doom_fire_preset.hpp"
+#include "keyboard_configurator/hyprland_watcher.hpp"
 #include "keyboard_configurator/key_activity.hpp"
 #include "keyboard_configurator/key_activity_watcher.hpp"
-#include "keyboard_configurator/doom_fire_preset.hpp"
-#include "keyboard_configurator/reactive_ripple_preset.hpp"
-#include "keyboard_configurator/rainbow_wave_preset.hpp"
-#include "keyboard_configurator/static_color_preset.hpp"
-#include "keyboard_configurator/star_matrix_preset.hpp"
 #include "keyboard_configurator/key_map_preset.hpp"
 #include "keyboard_configurator/liquid_plasma_preset.hpp"
+#include "keyboard_configurator/rainbow_wave_preset.hpp"
 #include "keyboard_configurator/reaction_diffusion_preset.hpp"
-#include "keyboard_configurator/smoke_preset.hpp"
-#include "keyboard_configurator/hyprland_watcher.hpp"
+#include "keyboard_configurator/reactive_ripple_preset.hpp"
 #include "keyboard_configurator/shortcut_watcher.hpp"
+#include "keyboard_configurator/smoke_preset.hpp"
+#include "keyboard_configurator/space_colonization_preset.hpp"
+#include "keyboard_configurator/star_matrix_preset.hpp"
+#include "keyboard_configurator/static_color_preset.hpp"
 
 using kb::cfg::ConfigLoader;
 using kb::cfg::ConfiguratorCLI;
 using kb::cfg::DeviceTransport;
-using kb::cfg::EffectEngine;
-using kb::cfg::PresetRegistry;
-using kb::cfg::RainbowWavePreset;
-using kb::cfg::RuntimeConfig;
-using kb::cfg::StaticColorPreset;
-using kb::cfg::StarMatrixPreset;
-using kb::cfg::KeyMapPreset;
 using kb::cfg::DoomFirePreset;
-using kb::cfg::ReactiveRipplePreset;
-using kb::cfg::LiquidPlasmaPreset;
-using kb::cfg::ReactionDiffusionPreset;
-using kb::cfg::SmokePreset;
+using kb::cfg::EffectEngine;
 using kb::cfg::HyprlandWatcher;
-using kb::cfg::ShortcutWatcher;
 using kb::cfg::KeyActivityProvider;
 using kb::cfg::KeyActivityWatcher;
+using kb::cfg::KeyMapPreset;
+using kb::cfg::LiquidPlasmaPreset;
+using kb::cfg::PresetRegistry;
+using kb::cfg::RainbowWavePreset;
+using kb::cfg::ReactionDiffusionPreset;
+using kb::cfg::ReactiveRipplePreset;
+using kb::cfg::RuntimeConfig;
+using kb::cfg::ShortcutWatcher;
+using kb::cfg::SmokePreset;
+using kb::cfg::SpaceColonizationPreset;
+using kb::cfg::StarMatrixPreset;
+using kb::cfg::StaticColorPreset;
 
 namespace {
 
-PresetRegistry buildRegistry() {
+PresetRegistry buildRegistry()
+{
     PresetRegistry registry;
     registry.registerPreset("static_color", [] { return std::make_unique<StaticColorPreset>(); });
     registry.registerPreset("rainbow_wave", [] { return std::make_unique<RainbowWavePreset>(); });
@@ -49,15 +52,17 @@ PresetRegistry buildRegistry() {
     registry.registerPreset("key_map", [] { return std::make_unique<KeyMapPreset>(); });
     registry.registerPreset("liquid_plasma", [] { return std::make_unique<LiquidPlasmaPreset>(); });
     registry.registerPreset("reaction_diffusion", [] { return std::make_unique<ReactionDiffusionPreset>(); });
+    registry.registerPreset("space_colonization", [] { return std::make_unique<SpaceColonizationPreset>(); });
     registry.registerPreset("smoke", [] { return std::make_unique<SmokePreset>(); });
     registry.registerPreset("doom_fire", [] { return std::make_unique<DoomFirePreset>(); });
     registry.registerPreset("reactive_ripple", [] { return std::make_unique<ReactiveRipplePreset>(); });
     return registry;
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
     try {
         auto registry = buildRegistry();
         ConfigLoader loader(registry);
@@ -85,9 +90,9 @@ int main(int argc, char** argv) {
         }
 
         ConfiguratorCLI cli(runtime.model,
-                            engine,
-                            std::move(runtime.preset_parameters),
-                            runtime.frame_interval);
+            engine,
+            std::move(runtime.preset_parameters),
+            runtime.frame_interval);
 
         std::unique_ptr<KeyActivityWatcher> key_watcher;
         if (runtime.model.hasKeycodeMap()) {
@@ -105,7 +110,7 @@ int main(int argc, char** argv) {
             }
             hypr = std::make_unique<HyprlandWatcher>(*runtime.hypr, cli, engine.presetCount());
             if (shortcuts) {
-                hypr->setActiveClassCallback([sw = shortcuts.get()](const std::string& klass){
+                hypr->setActiveClassCallback([sw = shortcuts.get()](const std::string& klass) {
                     sw->setActiveClass(klass);
                 });
             }

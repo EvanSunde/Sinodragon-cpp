@@ -42,6 +42,7 @@ add_library(keyboard_configurator STATIC
     src/smoke_preset.cpp
     src/doom_fire_preset.cpp
     src/reactive_ripple_preset.cpp
+    src/space_colonization_preset.cpp
     src/effect_engine.cpp
     src/config_loader.cpp
     src/configurator_cli.cpp
