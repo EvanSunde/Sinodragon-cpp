@@ -51,6 +51,7 @@ void SpaceColonizationPreset::configure(const ParameterMap& params)
     auto setInt = [&](const char* k, int& v) { if(params.count(k)) v = std::stoi(params.at(k)); };
     auto setDbl = [&](const char* k, double& v) { if(params.count(k)) v = std::stod(params.at(k)); };
 
+    // Standard params
     setInt("attractors", attractor_count_);
     setDbl("kill_dist", kill_dist_);
     setDbl("influence_dist", influence_dist_);
@@ -58,10 +59,16 @@ void SpaceColonizationPreset::configure(const ParameterMap& params)
     setDbl("zoom", zoom_);
     setDbl("thickness", thickness_base_);
 
-    // NEW PARAMS
-    setDbl("growth_interval", growth_interval_); // Speed control
-    setDbl("lifespan", lifespan_); // Time before fade
-    setDbl("fade_time", fade_time_); // Duration of fade
+    // Life and Timing params
+    setDbl("growth_interval", growth_interval_);
+    setDbl("lifespan", lifespan_);
+    setDbl("fade_time", fade_time_);
+
+    // NEW: Thickness Decay and Interaction Mode
+    setDbl("thickness_decay", thickness_decay_);
+    if (params.count("interaction_mode")) {
+        interaction_mode_ = params.at("interaction_mode");
+    }
 
     if (params.count("color_root"))
         color_root_ = parseHexColor(params.at("color_root"));
@@ -80,16 +87,21 @@ void SpaceColonizationPreset::reset()
 {
     attractors_.clear();
     nodes_.clear();
-    // We do NOT spawn a default root if reactive is enabled.
-    // We wait for a keypress to spawn a root.
+
     if (!reactive_enabled_) {
+        // Static mode: Center root
         nodes_.push_back({ { 0.5, 0.5 }, -1, thickness_base_, 0.0, 0.0, 1.0 });
-        // Initial random attractors for static mode
         for (int i = 0; i < attractor_count_; ++i) {
-            double x = (double)rand() / RAND_MAX;
-            double y = (double)rand() / RAND_MAX;
-            attractors_.push_back({ x, y });
+            attractors_.push_back({ (double)rand() / RAND_MAX, (double)rand() / RAND_MAX });
         }
+    } else {
+        // Reactive Mode
+        if (interaction_mode_ == "food") {
+            // Spawn a permanent "Base" at the bottom center (Spacebar area)
+            // This gives the "Hungry Veins" a place to start from.
+            nodes_.push_back({ { 0.5, 0.9 }, -1, thickness_base_, 0.0, 0.0, 1.0 });
+        }
+        // In "root" mode, we stay empty and wait for the first keypress.
     }
 }
 
@@ -209,40 +221,40 @@ void SpaceColonizationPreset::applyKeyActivityInjection(double now)
     if (!reactive_enabled_ || !key_activity_provider_)
         return;
 
-    auto events = key_activity_provider_->recentEvents(0.1); // check last 100ms
+    auto events = key_activity_provider_->recentEvents(0.1); 
     for (const auto& ev : events) {
-        if (ev.key_index >= xs_.size())
-            continue;
+        if (ev.key_index >= xs_.size()) continue;
 
-        // Probability check to avoid spamming roots on every micro-frame of a keypress
-        // ev.intensity usually 0.0 to 1.0.
-        if ((rand() % 100) < 30) { // 30% chance per event to spawn a root
+        double kx = xs_[ev.key_index];
+        double ky = ys_[ev.key_index];
 
-            // 1. SPAWN A NEW ROOT at the key location
-            Node root;
-            root.pos = { xs_[ev.key_index], ys_[ev.key_index] };
-            root.parent_idx = -1;
-            root.thickness = thickness_base_;
-            root.birth_time = now;
-            root.opacity = 1.0;
-            nodes_.push_back(root);
+        if (interaction_mode_ == "root") {
+            // ROOT MODE: Spawn a new vein starting point at the finger
+            // if ((rand() % 100) < 30) { 
+                Node root;
+                root.pos = { kx, ky };
+                root.parent_idx = -1;
+                root.thickness = thickness_base_;
+                root.birth_time = now;
+                root.opacity = 1.0;
+                nodes_.push_back(root);
 
-            // 2. SPAWN FOOD around this key so the root has something to eat
-            // We scatter food in a radius around the key
-            int food_to_spawn = 20;
-            double spread = 0.2; // 20% of keyboard width
-
-            for (int k = 0; k < food_to_spawn; ++k) {
-                double angle = (double)rand() / RAND_MAX * 6.28;
-                double dist = (double)rand() / RAND_MAX * spread + 0.02; // Min dist 0.02
-
-                double fx = root.pos.x + cos(angle) * dist;
-                double fy = root.pos.y + sin(angle) * dist;
-
-                // Bounds check
-                if (fx >= 0 && fx <= 1.0 && fy >= 0 && fy <= 1.0) {
-                    attractors_.push_back({ fx, fy });
+                // Add local food so this specific root grows immediately
+                for (int k = 0; k < 15; ++k) {
+                    double angle = (double)rand() / RAND_MAX * 6.28;
+                    double dist = (double)rand() / RAND_MAX * 0.15 + 0.02;
+                    attractors_.push_back({ kx + cos(angle) * dist, ky + sin(angle) * dist });
                 }
+            // }
+        } 
+        else if (interaction_mode_ == "food") {
+            // FOOD MODE: Do NOT spawn nodes. Only spawn "scent" at the finger.
+            // The vein at the bottom of the board will "smell" this and grow toward it.
+            int food_count = 10; 
+            for (int k = 0; k < food_count; ++k) {
+                double angle = (double)rand() / RAND_MAX * 6.28;
+                double dist = (double)rand() / RAND_MAX * 0.1; 
+                attractors_.push_back({ kx + cos(angle) * dist, ky + sin(angle) * dist });
             }
         }
     }
