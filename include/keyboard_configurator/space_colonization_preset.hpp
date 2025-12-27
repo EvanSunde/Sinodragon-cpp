@@ -58,6 +58,7 @@ private:
 
     // Interactive
     bool reactive_enabled_ = true;
+    std::string interaction_mode_ = "root"; // "root" or "food"
     double injection_history_ = 0.1;
     KeyActivityProviderPtr key_activity_provider_;
 
