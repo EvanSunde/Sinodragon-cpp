@@ -27,6 +27,7 @@ private:
     MixMode mix_mode_{MixMode::Linear};
     std::vector<RgbColor> palette_{}; // up to 10 colors
 
+    // --- Reactive Config ---
     bool reactive_enabled_{false};
     double reactive_history_{1.2};
     double reactive_decay_{0.35};
@@ -37,6 +38,12 @@ private:
     double reactive_push_duration_{0.2};
     bool reactive_push_{false};
 
+    // --- NEW: Visual Upgrades ---
+    bool reactive_ripple_enabled_{false};   // Upgrade 1: Traveling Sine Wave
+    double reactive_turbulence_{0.0};       // Upgrade 2: Random warping (0.0 to 1.0)
+    bool reactive_splash_enabled_{false};   // Upgrade 3: Drifts with liquid flow
+
+    // --- Internal State ---
     bool coords_built_{false};
     std::vector<double> xs_;
     std::vector<double> ys_;

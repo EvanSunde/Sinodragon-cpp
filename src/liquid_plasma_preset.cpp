@@ -109,15 +109,23 @@ void LiquidPlasmaPreset::configure(const ParameterMap& params) {
             }
         }
     };
+    if (auto it = params.find("reactive_ripple"); it != params.end()) {
+        reactive_ripple_enabled_ = parseBool(it->second);
+    }
+
     parseClamp("reactive_history", reactive_history_, 0.05);
     parseClamp("reactive_decay", reactive_decay_, 0.01);
     parseClamp("reactive_spread", reactive_spread_, 0.005);
     parseClamp("reactive_intensity", reactive_intensity_, 0.0);
     parseClamp("reactive_displacement", reactive_displacement_, 0.0);
     parseClamp("reactive_phase_shift", reactive_phase_shift_, 0.0);
+    parseClamp("reactive_turbulence", reactive_turbulence_, 0.0);
     parseClamp("reactive_push_duration", reactive_push_duration_, 0.0);
     if (auto it = params.find("reactive_push"); it != params.end()) {
         reactive_push_ = parseBool(it->second);
+    }
+    if (auto it = params.find("reactive_splash"); it != params.end()) {
+        reactive_splash_enabled_ = parseBool(it->second);
     }
 }
 
@@ -216,68 +224,129 @@ void LiquidPlasmaPreset::render(const KeyboardModel& model,
 bool LiquidPlasmaPreset::computeReactiveFields(std::vector<double>& disp_x,
                                                std::vector<double>& disp_y,
                                                std::vector<double>& phase_shift) {
-    if (!reactive_enabled_ || !provider_ || !coords_built_) {
-        return false;
-    }
+    if (!reactive_enabled_ || !provider_ || !coords_built_) return false;
+
     const auto total = xs_.size();
+    if (total == 0) return false;
+
+    // Reset outputs
     disp_x.assign(total, 0.0);
     disp_y.assign(total, 0.0);
     phase_shift.assign(total, 0.0);
-    if (total == 0) {
-        return false;
-    }
 
     const auto events = provider_->recentEvents(reactive_history_);
-    if (events.empty()) {
-        return false;
-    }
+    if (events.empty()) return false;
 
+    // --- Constants ---
     const double spread = std::max(0.005, reactive_spread_);
     const double sigma2 = 2.0 * spread * spread;
     const double decay = std::max(0.01, reactive_decay_);
     const double now = provider_->nowSeconds();
+    
+    // OPTIMIZATION: Cutoff distance. 
+    // We assume any contribution < 0.5% is invisible.
+    // This dramatically reduces CPU load.
+    const double cutoff_dist2 = 6.0 * sigma2; 
+
     const double base_disp = std::max(0.0, reactive_displacement_);
     const double phase_scale = std::max(0.0, reactive_phase_shift_);
     const double direction_sign = reactive_push_ ? 1.0 : -1.0;
     const double push_window = std::max(0.0, reactive_push_duration_);
+    const bool calc_displacement = base_disp > 0.0;
+    const bool calc_phase = phase_scale > 0.0;
+
+    // Early exit if no visual output is requested
+    if (!calc_displacement && !calc_phase) return false;
 
     for (const auto& ev : events) {
-        if (ev.key_index >= total) {
-            continue;
-        }
-        const double ex = xs_[ev.key_index];
-        const double ey = ys_[ev.key_index];
+        if (ev.key_index >= total) continue;
+
+        // Temporal Decay
         const double age = std::max(0.0, now - ev.time_seconds);
-        if (push_window > 0.0 && age > push_window) {
-            continue;
-        }
+        if (push_window > 0.0 && age > push_window) continue;
+
         double window_factor = 1.0;
         if (push_window > 0.0) {
             window_factor = std::max(0.0, 1.0 - age / push_window);
         }
+
+        // Calculate base weight
         const double temporal = std::exp(-age / decay) * window_factor;
-        const double weight = ev.intensity * reactive_intensity_ * temporal;
-        if (weight <= 0.0) {
-            continue;
+        double weight = ev.intensity * reactive_intensity_ * temporal;
+        
+        // Skip invisible events
+        if (weight <= 0.005) continue; 
+
+        // UPGRADE 3: Splash Velocity (Drift)
+        // Moves the epicenter of the ripple based on the liquid speed
+        double drift_x = 0.0;
+        double drift_y = 0.0;
+        if (reactive_splash_enabled_) {
+             // Drifting roughly 50% of the main liquid speed
+             // You can make this direction dynamic if your preset has a direction vector
+             drift_x = age * speed_ * 0.5;
+             drift_y = age * speed_ * 0.5;
         }
+
+        const double ex = xs_[ev.key_index] + drift_x;
+        const double ey = ys_[ev.key_index] + drift_y;
+
+        // INNER LOOP: Iterate keys
         for (std::size_t k = 0; k < total; ++k) {
-            const double px = xs_[k] - ex;
-            const double py = ys_[k] - ey;
-            const double dist2 = px * px + py * py;
-            const double spatial = std::exp(-dist2 / sigma2);
+            
+            // UPGRADE 2: Turbulence (Warp)
+            // Adds pseudo-random offsets to key positions.
+            // Uses a simple sine hash based on key index 'k'.
+            double warp = 0.0;
+            if (reactive_turbulence_ > 0.0) {
+                // Determine 'randomness' from key index
+                warp = std::sin(static_cast<double>(k) * 132.5) * 0.02 * reactive_turbulence_;
+            }
+
+            const double dx = (xs_[k] + warp) - ex;
+            const double dy = (ys_[k] + warp) - ey;
+            const double dist2 = dx * dx + dy * dy;
+
+            // OPTIMIZATION: Distance Cutoff
+            if (dist2 > cutoff_dist2) continue;
+
+            // Base shape (Gaussian bell curve)
+            double spatial = std::exp(-dist2 / sigma2);
+
+            // UPGRADE 1: Ripple (Sine Wave Decay)
+            if (reactive_ripple_enabled_) {
+                // Calculate distance for the wave function
+                // We need sqrt here, but since we are inside the cutoff, it's safe.
+                double len = std::sqrt(dist2);
+                
+                // Formula: sin(distance - time)
+                // 20.0 = Wave Density (how many rings)
+                // 15.0 = Wave Speed (how fast they expand)
+                double wave = std::sin(len * 20.0 - age * 15.0);
+                
+                // Map [-1, 1] sine wave to [0, 1] range for nicer lighting
+                wave = (wave * 0.5) + 0.5;
+                
+                spatial *= wave;
+            }
+
             const double contribution = weight * spatial;
-            if (contribution <= 0.0) {
-                continue;
+
+            // Apply Displacement
+            if (calc_displacement) {
+                // Ensure we don't divide by zero
+                if (dist2 > 1e-6) { 
+                    // If we haven't calc'd sqrt yet (ripple disabled), do it now
+                    double len = (reactive_ripple_enabled_) ? std::sqrt(dist2) : std::sqrt(dist2);
+                    
+                    const double magnitude = base_disp * contribution;
+                    disp_x[k] += direction_sign * (dx / len) * magnitude;
+                    disp_y[k] += direction_sign * (dy / len) * magnitude;
+                }
             }
-            const double len = std::sqrt(dist2);
-            if (base_disp > 0.0 && len > 1e-6) {
-                const double magnitude = base_disp * contribution;
-                const double dir_x = px / len;
-                const double dir_y = py / len;
-                disp_x[k] += direction_sign * dir_x * magnitude;
-                disp_y[k] += direction_sign * dir_y * magnitude;
-            }
-            if (phase_scale > 0.0) {
+
+            // Apply Phase Shift
+            if (calc_phase) {
                 phase_shift[k] += direction_sign * phase_scale * contribution;
             }
         }
@@ -285,5 +354,4 @@ bool LiquidPlasmaPreset::computeReactiveFields(std::vector<double>& disp_x,
 
     return true;
 }
-
 }  // namespace kb::cfg
