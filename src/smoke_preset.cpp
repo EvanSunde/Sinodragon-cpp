@@ -163,104 +163,156 @@ void SmokePreset::render(const KeyboardModel& model,
     if (frame.size() != total) frame.resize(total);
     if (!coords_built_) buildCoords(model);
 
+    // Reactive Displacement (Same as before)
     std::vector<double> disp_x;
     std::vector<double> disp_y;
     computeReactiveDisplacement(disp_x, disp_y);
 
     double t_anim = time_seconds * speed_;
-    double offset_x = time_seconds * drift_x_;
-    double offset_y = time_seconds * drift_y_;
+    
+    // Wind drift (Base movement)
+    double drift_x = time_seconds * drift_x_;
+    double drift_y = time_seconds * drift_y_;
+
     for (std::size_t i = 0; i < total; ++i) {
         double base_x = xs_[i];
         double base_y = ys_[i];
-        if (i < disp_x.size()) {
-            base_x = std::clamp(base_x + disp_x[i], 0.0, 1.0);
-        }
-        if (i < disp_y.size()) {
-            base_y = std::clamp(base_y + disp_y[i], 0.0, 1.0);
-        }
-        double x = base_x * scale_ + offset_x;
-        double y = base_y * scale_ + offset_y;
+
+        // Apply Reactive Push
+        if (i < disp_x.size()) base_x = std::clamp(base_x + disp_x[i], 0.0, 1.0);
+        if (i < disp_y.size()) base_y = std::clamp(base_y + disp_y[i], 0.0, 1.0);
+
+        // --- UPGRADE 1: DOMAIN WARPING (The "Curl") ---
+        // We sample noise at a very large scale to "warp" the coordinate grid.
+        // This makes the smoke look like it is twisting in the wind, not just scrolling.
+        double warp_scale = 1.5; 
+        double warp = perlin(base_x * warp_scale, base_y * warp_scale, t_anim * 0.2);
+        
+        // Distort the coordinates slightly based on the warp noise
+        double x = base_x * scale_ + drift_x + (warp * 0.5); 
+        double y = base_y * scale_ + drift_y + (warp * 0.5);
+
+        // --- UPGRADE 2: TURBULENCE (The "Billow") ---
         double amp = 1.0;
         double freq = 1.0;
         double sum = 0.0;
         double norm = 0.0;
+
         for (int o = 0; o < octaves_; ++o) {
-            sum += amp * perlin(x * freq, y * freq, t_anim * freq);
+            // Get noise [0, 1]
+            double n = perlin(x * freq, y * freq, t_anim * freq);
+            
+            // Convert to [-1, 1] range to get the "crease"
+            double raw = 2.0 * n - 1.0;
+            
+            // Absolute value creates sharp ridges (fire/smoke look)
+            sum += amp * std::abs(raw);
+            
             norm += amp;
             amp *= persistence_;
             freq *= lacunarity_;
         }
+
         double v = norm > 0.0 ? sum / norm : 0.0;
-        // Apply contrast around 0.5 center
-        v = 0.5 + (v - 0.5) * contrast_;
-        v = std::clamp(v, 0.0, 1.0);
+
+        // Invert so 0 is "wispy edge" and 1 is "thick center" (optional, depends on taste)
+        v = 1.0 - v; 
+
+        // Apply Contrast
+        v = (v - 0.5) * contrast_ + 0.5;
+        
+        // --- UPGRADE 3: DENSITY CURVE (The "Wisp") ---
+        // Smoke is not linear. Pushing 'v' to a power (e.g., cubed) makes the 
+        // thin parts transparent and the thick parts solid.
+        // Higher power = thinner, sharper wisps.
+        v = std::pow(std::clamp(v, 0.0, 1.0), 3.0); 
+
+        // Color Blending
         RgbColor c{};
-        c.r = static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(color_low_.r * (1.0 - v) + color_high_.r * v)), 0, 255));
-        c.g = static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(color_low_.g * (1.0 - v) + color_high_.g * v)), 0, 255));
-        c.b = static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(color_low_.b * (1.0 - v) + color_high_.b * v)), 0, 255));
+        // 'color_low_' is usually background (black/transparent)
+        // 'color_high_' is the smoke color (gray/white)
+        c.r = static_cast<std::uint8_t>(std::clamp<int>(std::lround(lerp(color_low_.r, color_high_.r, v)), 0, 255));
+        c.g = static_cast<std::uint8_t>(std::clamp<int>(std::lround(lerp(color_low_.g, color_high_.g, v)), 0, 255));
+        c.b = static_cast<std::uint8_t>(std::clamp<int>(std::lround(lerp(color_low_.b, color_high_.b, v)), 0, 255));
         frame.setColor(i, c);
     }
 }
 
 void SmokePreset::computeReactiveDisplacement(std::vector<double>& dx, std::vector<double>& dy) {
     const std::size_t total = xs_.size();
-    dx.assign(total, 0.0);
-    dy.assign(total, 0.0);
     if (!reactive_enabled_ || !provider_ || !coords_built_ || total == 0) {
         return;
     }
+
+    // Reset vectors
+    dx.assign(total, 0.0);
+    dy.assign(total, 0.0);
+
     const auto events = provider_->recentEvents(reactive_history_);
     if (events.empty()) {
         return;
     }
 
+    // Constants
+    const double base_disp = std::max(0.0, reactive_displacement_);
+    
+    // OPTIMIZATION 1: Early Exit
+    // If displacement strength is zero, there is nothing to calculate.
+    if (base_disp <= 0.0) return; 
+
     const double spread = std::max(0.01, reactive_spread_);
     const double sigma2 = 2.0 * spread * spread;
     const double decay = std::max(0.01, reactive_decay_);
     const double now = provider_->nowSeconds();
-    const double base_disp = std::max(0.0, reactive_displacement_);
     const double direction_sign = reactive_push_ ? 1.0 : -1.0;
     const double push_window = std::max(0.0, reactive_push_duration_);
 
+    // OPTIMIZATION 2: Distance Cutoff
+    // Any smoke particle further than this is invisible (< 0.5% opacity)
+    // -ln(0.005) is approx 5.3. Using 6.0 covers the visible range safely.
+    const double cutoff_dist2 = 6.0 * sigma2; 
+
     for (const auto& ev : events) {
-        if (ev.key_index >= total) {
-            continue;
-        }
-        const double ex = xs_[ev.key_index];
-        const double ey = ys_[ev.key_index];
+        if (ev.key_index >= total) continue;
+
         const double age = std::max(0.0, now - ev.time_seconds);
-        if (push_window > 0.0 && age > push_window) {
-            continue;
-        }
+        if (push_window > 0.0 && age > push_window) continue;
+
         double window_factor = 1.0;
         if (push_window > 0.0) {
             window_factor = std::max(0.0, 1.0 - age / push_window);
         }
+
         const double temporal = std::exp(-age / decay) * window_factor;
         const double weight = ev.intensity * reactive_intensity_ * temporal;
-        if (weight <= 0.0) {
-            continue;
-        }
+
+        // OPTIMIZATION 3: Weight Cutoff
+        // If the event is too old/weak (less than 0.5% effect), skip it.
+        if (weight <= 0.005) continue;
+
+        const double ex = xs_[ev.key_index];
+        const double ey = ys_[ev.key_index];
+
+        // INNER LOOP
         for (std::size_t k = 0; k < total; ++k) {
-            double px = xs_[k] - ex;
-            double py = ys_[k] - ey;
-            double dist2 = px * px + py * py;
-            double spatial = std::exp(-dist2 / sigma2);
-            double magnitude = base_disp * weight * spatial;
-            if (magnitude <= 0.0) {
-                continue;
+            const double px = xs_[k] - ex;
+            const double py = ys_[k] - ey;
+            const double dist2 = px * px + py * py;
+
+            // OPTIMIZATION 4: Spatial Skip
+            // Skip exp() and sqrt() if the key is too far away
+            if (dist2 > cutoff_dist2) continue;
+
+            const double spatial = std::exp(-dist2 / sigma2);
+            const double magnitude = base_disp * weight * spatial;
+
+            // Ensure we don't divide by zero
+            if (dist2 > 1e-6) {
+                const double len = std::sqrt(dist2);
+                // Normalized direction vector * magnitude
+                dx[k] += direction_sign * (px / len) * magnitude;
+                dy[k] += direction_sign * (py / len) * magnitude;
             }
-            double len = std::sqrt(dist2);
-            if (len < 1e-5) {
-                continue;
-            }
-            double dir_x = px / len;
-            double dir_y = py / len;
-            dx[k] += direction_sign * dir_x * magnitude;
-            dy[k] += direction_sign * dir_y * magnitude;
         }
     }
-}
-
 }  // namespace kb::cfg
