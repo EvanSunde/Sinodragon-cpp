@@ -315,4 +315,6 @@ void SmokePreset::computeReactiveDisplacement(std::vector<double>& dx, std::vect
             }
         }
     }
-}  // namespace kb::cfg
+}  
+
+}// namespace kb::cfg
