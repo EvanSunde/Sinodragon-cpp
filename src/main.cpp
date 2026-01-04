@@ -111,7 +111,7 @@ int main(int argc, char** argv)
             hypr = std::make_unique<HyprlandWatcher>(*runtime.hypr, cli, engine.presetCount());
             if (shortcuts) {
                 hypr->setActiveClassCallback([sw = shortcuts.get()](const std::string& klass) {
-                    sw->setActiveClass(klass);
+                    return sw->setActiveClass(klass);
                 });
             }
             hypr->start();

@@ -127,7 +127,18 @@ void HyprlandWatcher::runLoop(std::string socket_path) {
                         continue; 
                     }
                     last_class_ = appClass;
-                    if (on_class_) { on_class_(last_class_); }
+                    
+                    bool shortcuts_engaged = false;
+                    if (on_class_) { 
+                        shortcuts_engaged = on_class_(last_class_); 
+                    }
+
+                    // If shortcuts are engaged, DO NOT update the profile here.
+                    // The ShortcutWatcher will handle restoring the correct profile
+                    // when the shortcuts are disengaged.
+                    if (shortcuts_engaged) {
+                        continue;
+                    }
 
                     // --- Painter's Algorithm Logic ---
                     if (!cfg_.profile_draw_order.empty()) {

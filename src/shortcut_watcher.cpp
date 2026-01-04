@@ -69,7 +69,8 @@ void ShortcutWatcher::stop() {
     closeDevices();
 }
 
-void ShortcutWatcher::setActiveClass(const std::string& klass) {
+bool ShortcutWatcher::setActiveClass(const std::string& klass) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     active_class_ = klass;
     updateActiveShortcutFromClass();
     
@@ -79,6 +80,8 @@ void ShortcutWatcher::setActiveClass(const std::string& klass) {
     
     // Re-apply mods to ensure logic stays consistent
     applyMaskForMods(mods_.load());
+    
+    return engaged_;
 }
 
 void ShortcutWatcher::openDevices() {
@@ -162,6 +165,7 @@ void ShortcutWatcher::runLoop() {
 }
 
 void ShortcutWatcher::updateActiveShortcutFromClass() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::string name;
     auto it = hypr_.class_to_shortcut.find(active_class_);
     if (it != hypr_.class_to_shortcut.end()) name = it->second;
@@ -180,6 +184,7 @@ void ShortcutWatcher::updateActiveShortcutFromClass() {
 
 // --- Helper to restore state based on Active Window ---
 void ShortcutWatcher::restoreActiveProfile() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     // 1. Determine which profile SHOULD be active
     std::string prof = hypr_.default_profile;
     auto pit = hypr_.class_to_profile.find(active_class_);
@@ -204,6 +209,7 @@ void ShortcutWatcher::restoreActiveProfile() {
 }
 
 void ShortcutWatcher::applyMaskForMods(int modmask) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!overlay_valid_) return;
 
     // Calculate mask based on active shortcut profile + mods

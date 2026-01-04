@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -29,7 +30,8 @@ public:
     void stop();
 
     // Called from Hyprland watcher when active window class changes
-    void setActiveClass(const std::string& klass);
+    // Returns true if shortcuts are currently ENGAGED (overlay active)
+    bool setActiveClass(const std::string& klass);
 
 private:
     const KeyboardModel& model_;
@@ -50,6 +52,7 @@ private:
     // Threading
     std::atomic<bool> stop_{false};
     std::thread thread_;
+    mutable std::recursive_mutex mutex_;
 
     // State
     std::string active_class_;
