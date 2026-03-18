@@ -94,11 +94,11 @@ void SpaceColonizationPreset::reset()
     last_real_time_ = 0;
 
     if (!reactive_enabled_) {
-        nodes_.push_back({ { 0.5, 0.5 }, -1, thickness_base_, 0.0, 0.0, 1.0 });
+        nodes_.push_back({ { random01(), random01() }, -1, thickness_base_, 0.0, 0.0, 1.0 });
         for (int i = 0; i < attractor_count_; ++i)
             attractors_.push_back({ random01(), random01() });
     } else if (interaction_mode_ == "food") {
-        nodes_.push_back({ { 0.5, 0.95 }, -1, thickness_base_, 0.0, 0.0, 1.0 });
+        nodes_.push_back({ { random01(), random01() }, -1, thickness_base_, 0.0, 0.0, 1.0 });
     }
 }
 
@@ -291,7 +291,7 @@ void SpaceColonizationPreset::render(const KeyboardModel& model, double time, Ke
 
         if (found) {
             double dist = std::sqrt(min_dist_sq);
-            double brightness = std::max(0.0, 1.0 - dist * 21.0) * best_opacity;
+            double brightness = std::exp(-dist * dist * 400.0) * best_opacity;
             frame.setColor(i, { (uint8_t)((color_root_.r * (1.0 - best_ratio) + color_tip_.r * best_ratio) * brightness), (uint8_t)((color_root_.g * (1.0 - best_ratio) + color_tip_.g * best_ratio) * brightness), (uint8_t)((color_root_.b * (1.0 - best_ratio) + color_tip_.b * best_ratio) * brightness) });
         } else {
             frame.setColor(i, { 0, 0, 0 });
