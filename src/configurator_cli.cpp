@@ -7,6 +7,8 @@
 #include "keyboard_configurator/effect_engine.hpp"
 #include "keyboard_configurator/keyboard_model.hpp"
 
+#include "keyboard_configurator/snake_preset.hpp"
+
 namespace kb::cfg {
 
 ConfiguratorCLI::ConfiguratorCLI(const KeyboardModel& model,
@@ -36,6 +38,7 @@ void ConfiguratorCLI::printHelp() const {
               << "  toggle <index>          - toggle preset on/off" << '\n'
               << "  set <index> <key> <val> - set preset parameter" << '\n'
               << "  frame <ms>              - set frame interval for animated presets" << '\n'
+              << "  snake <start|stop>      - start or stop snake game" << '\n'
               << "  quit                     - exit" << '\n';
 }
 
@@ -96,6 +99,53 @@ bool ConfiguratorCLI::setPresetParameter(std::size_t index,
     auto& preset = engine_.presetAt(index);
     preset.configure(preset_parameters_[index]);
     return true;
+}
+
+void ConfiguratorCLI::handleSnakeCommand(const std::string& arg) {
+    bool should_refresh = false;
+    bool should_override = false;
+    bool should_clear_override = false;
+    std::size_t snake_index = 0;
+
+    {
+        std::lock_guard<std::mutex> guard(engine_mutex_);
+        for (std::size_t i = 0; i < engine_.presetCount(); ++i) {
+            if (engine_.presetAt(i).id() == "snake") {
+                auto* snake_preset = dynamic_cast<SnakePreset*>(&engine_.presetAt(i));
+                if (snake_preset) {
+                    if (arg == "start") {
+                        snake_preset->start(model_);
+                        engine_.setPresetEnabled(i, true);
+                        snake_index = i;
+                        should_override = true;
+                        std::cout << "Snake game started!\n";
+                    } else if (arg == "stop") {
+                        snake_preset->stop();
+                        engine_.setPresetEnabled(i, false);
+                        should_clear_override = true;
+                        std::cout << "Snake game stopped.\n";
+                    } else {
+                        std::cout << "Usage: snake <start|stop>\n";
+                    }
+                    should_refresh = true;
+                    break;
+                }
+            }
+        }
+        if (!should_refresh) {
+            std::cout << "Snake preset not found.\n";
+        }
+    }
+
+    if (should_override) {
+        applySnakeOverride(snake_index);
+    } else if (should_clear_override) {
+        clearSnakeOverride();
+    }
+
+    if (should_refresh) {
+        syncRenderState(true);
+    }
 }
 
 bool ConfiguratorCLI::engineHasAnimated() const {
@@ -210,6 +260,13 @@ void ConfiguratorCLI::run() {
                 frame_interval_ms_.store(interval_ms);
                 std::cout << "Frame interval set to " << interval_ms << " ms" << '\n';
             }
+        } else if (cmd == "snake") {
+            std::string arg;
+            if (iss >> arg) {
+                handleSnakeCommand(arg);
+            } else {
+                std::cout << "Usage: snake <start|stop>\n";
+            }
         } else if (cmd == "quit" || cmd == "exit") {
             break;
         } else {
@@ -225,11 +282,23 @@ void ConfiguratorCLI::run() {
 
 void ConfiguratorCLI::setDrawList(const std::vector<std::size_t>& list) {
     std::lock_guard<std::mutex> guard(engine_mutex_);
+    if (snake_override_active_) {
+        saved_draw_list_ = list;
+        saved_draw_list_valid_ = true;
+        return;
+    }
+    current_draw_list_ = list;
     engine_.setDrawList(list);
 }
 
 void ConfiguratorCLI::applyPresetMasks(const std::vector<std::vector<bool>>& masks) {
     std::lock_guard<std::mutex> guard(engine_mutex_);
+    if (snake_override_active_) {
+        saved_masks_ = masks;
+        saved_masks_valid_ = true;
+        return;
+    }
+    current_masks_ = masks;
     engine_.setPresetMasks(masks, true);
 }
 
@@ -240,6 +309,18 @@ void ConfiguratorCLI::refreshRender() {
 void ConfiguratorCLI::applyPresetMask(std::size_t index, const std::vector<bool>& mask) {
     std::lock_guard<std::mutex> guard(engine_mutex_);
     if (index < engine_.presetCount()) {
+        if (snake_override_active_) {
+            if (saved_masks_.size() < engine_.presetCount()) {
+                saved_masks_.resize(engine_.presetCount());
+            }
+            saved_masks_[index] = mask;
+            saved_masks_valid_ = true;
+            return;
+        }
+        if (current_masks_.size() < engine_.presetCount()) {
+            current_masks_.resize(engine_.presetCount());
+        }
+        current_masks_[index] = mask;
         engine_.setPresetMask(index, mask);
     }
 }
@@ -257,6 +338,54 @@ void ConfiguratorCLI::applyPresetParameter(std::size_t index, const std::string&
         auto& preset = engine_.presetAt(index);
         preset.configure(preset_parameters_[index]);
     }
+}
+
+void ConfiguratorCLI::applySnakeOverride(std::size_t snake_index)
+{
+    snake_override_active_ = true;
+
+    saved_draw_list_ = current_draw_list_;
+    saved_draw_list_valid_ = true;
+
+    if (!current_masks_.empty()) {
+        saved_masks_ = current_masks_;
+        saved_masks_valid_ = true;
+    } else {
+        saved_masks_.clear();
+        saved_masks_valid_ = false;
+    }
+
+    std::vector<std::size_t> snake_only = { snake_index };
+    engine_.setDrawList(snake_only);
+    current_draw_list_ = snake_only;
+
+    std::vector<bool> full(model_.keyCount(), true);
+    engine_.setPresetMask(snake_index, full);
+}
+
+void ConfiguratorCLI::clearSnakeOverride()
+{
+    if (!snake_override_active_)
+        return;
+
+    snake_override_active_ = false;
+
+    if (saved_draw_list_valid_) {
+        engine_.setDrawList(saved_draw_list_);
+        current_draw_list_ = saved_draw_list_;
+    } else {
+        engine_.setDrawList(current_draw_list_);
+    }
+
+    if (saved_masks_valid_) {
+        engine_.setPresetMasks(saved_masks_, true);
+        current_masks_ = saved_masks_;
+    }
+
+    saved_draw_list_valid_ = false;
+    saved_masks_valid_ = false;
+    saved_draw_list_.clear();
+    saved_masks_.clear();
 }
 
 }  // namespace kb::cfg

@@ -19,6 +19,7 @@
 #include "keyboard_configurator/space_colonization_preset.hpp"
 #include "keyboard_configurator/star_matrix_preset.hpp"
 #include "keyboard_configurator/static_color_preset.hpp"
+#include "keyboard_configurator/snake_preset.hpp"
 
 using kb::cfg::ConfigLoader;
 using kb::cfg::ConfiguratorCLI;
@@ -40,6 +41,7 @@ using kb::cfg::SmokePreset;
 using kb::cfg::SpaceColonizationPreset;
 using kb::cfg::StarMatrixPreset;
 using kb::cfg::StaticColorPreset;
+using kb::cfg::SnakePreset;
 
 namespace {
 
@@ -56,6 +58,7 @@ PresetRegistry buildRegistry()
     registry.registerPreset("smoke", [] { return std::make_unique<SmokePreset>(); });
     registry.registerPreset("doom_fire", [] { return std::make_unique<DoomFirePreset>(); });
     registry.registerPreset("reactive_ripple", [] { return std::make_unique<ReactiveRipplePreset>(); });
+    registry.registerPreset("snake", [] { return std::make_unique<SnakePreset>(); });
     return registry;
 }
 

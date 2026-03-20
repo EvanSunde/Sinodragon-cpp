@@ -60,6 +60,7 @@ private:
     // Manual CLI Commands
     bool togglePreset(std::size_t index);
     bool setPresetParameter(std::size_t index, const std::string& key, const std::string& value);
+    void handleSnakeCommand(const std::string& arg);
 
     // Rendering logic
     bool engineHasAnimated() const;
@@ -67,6 +68,19 @@ private:
     void startRenderLoop();
     void stopRenderLoop();
     void syncRenderState(bool refresh_static_frame);
+    void applySnakeOverride(std::size_t snake_index);
+    void clearSnakeOverride();
+
+    // Drawlist/mask tracking for overrides
+    std::vector<std::size_t> current_draw_list_;
+    std::vector<std::size_t> saved_draw_list_;
+    bool saved_draw_list_valid_ = false;
+
+    std::vector<std::vector<bool>> current_masks_;
+    std::vector<std::vector<bool>> saved_masks_;
+    bool saved_masks_valid_ = false;
+
+    bool snake_override_active_ = false;
 };
 
 }  // namespace kb::cfg
