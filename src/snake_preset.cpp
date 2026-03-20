@@ -169,6 +169,62 @@ void SnakePreset::processInput(const KeyboardModel& model)
     }
 }
 
+namespace {
+RgbColor hsvToRgb(double h, double s, double v)
+{
+    h = std::fmod(h, 360.0);
+    if (h < 0) h += 360.0;
+    s = std::clamp(s, 0.0, 1.0);
+    v = std::clamp(v, 0.0, 1.0);
+
+    double c = v * s;
+    double x = c * (1 - std::fabs(std::fmod(h / 60.0, 2) - 1));
+    double m = v - c;
+
+    double r = 0, g = 0, b = 0;
+    if (h < 60) { r = c; g = x; }
+    else if (h < 120) { r = x; g = c; }
+    else if (h < 180) { g = c; b = x; }
+    else if (h < 240) { g = x; b = c; }
+    else if (h < 300) { r = x; b = c; }
+    else { r = c; b = x; }
+
+    return {
+        static_cast<std::uint8_t>((r + m) * 255),
+        static_cast<std::uint8_t>((g + m) * 255),
+        static_cast<std::uint8_t>((b + m) * 255)
+    };
+}
+}
+
+void SnakePreset::randomizeColors()
+{
+    std::uniform_real_distribution<double> hue_dist(0.0, 360.0);
+    std::uniform_real_distribution<double> sat_dist(0.7, 1.0);
+    std::uniform_real_distribution<double> val_dist(0.6, 1.0);
+
+    auto generateColor = [&]() {
+        double hue = hue_dist(rng());
+        return hsvToRgb(hue, sat_dist(rng()), val_dist(rng()));
+    };
+
+    auto isCloseToFood = [&](const RgbColor& c) {
+        int dr = static_cast<int>(c.r) - static_cast<int>(color_food_.r);
+        int dg = static_cast<int>(c.g) - static_cast<int>(color_food_.g);
+        int db = static_cast<int>(c.b) - static_cast<int>(color_food_.b);
+        int dist_sq = dr * dr + dg * dg + db * db;
+        return dist_sq < 2000;
+    };
+
+    do {
+        color_head_ = generateColor();
+    } while (isCloseToFood(color_head_));
+
+    do {
+        color_body_ = generateColor();
+    } while (isCloseToFood(color_body_));
+}
+
 bool SnakePreset::isValidPosition(const KeyboardModel& model, const Position& pos) const
 {
     const auto& layout = model.layout();
@@ -278,6 +334,7 @@ void SnakePreset::updateGame(const KeyboardModel& model)
 
     if (ate_food) {
         spawnFood(model);
+        randomizeColors();
     }
 }
 

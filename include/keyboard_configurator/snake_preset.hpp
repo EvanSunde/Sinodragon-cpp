@@ -38,6 +38,7 @@ private:
     std::optional<Position> advanceWrapped(const KeyboardModel& model,
                                            const Position& from,
                                            Direction dir) const;
+    void randomizeColors();
 
     bool is_running_ = false;
     double step_interval_ = 0.2;
