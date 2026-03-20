@@ -201,7 +201,7 @@ void SnakePreset::randomizeColors()
 {
     std::uniform_real_distribution<double> hue_dist(0.0, 360.0);
     std::uniform_real_distribution<double> sat_dist(0.7, 1.0);
-    std::uniform_real_distribution<double> val_dist(0.6, 1.0);
+    std::uniform_real_distribution<double> val_dist(0.6, 1.0); // Make colors brighter. for low brightness use 0.2-0.7
 
     auto generateColor = [&]() {
         double hue = hue_dist(rng());
