@@ -143,7 +143,7 @@ layers = [
 
 [profiles.root]
 layers = [
-    { type = "space_colonization", attractors = 500, kill_dist = 0.03, segment_len = 0.02, steps =3, reactive = true, growth_interval = 0.2 , lifespan = 5.0, color_root = "#FF0000", color_tip = "#FFFF00" }
+    { type = "space_colonization", attractors = 500, kill_dist = 0.03, segment_len = 0.02, steps =3, reactive = true, growth_interval = 0.2 , lifespan = 5.0, interaction_mode = "root", color_root = "#FF0000", color_tip = "#FFFF00" }
 ]
 
 [profiles.smoke_n]
