@@ -19,6 +19,7 @@ struct Node {
     double dist_from_root = 0.0;
     double birth_time = 0.0;
     double opacity = 1.0;
+    double strength = 1.0; // For reinforcement tracking
 };
 
 class SpaceColonizationPreset : public LightingPreset {
