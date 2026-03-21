@@ -99,6 +99,15 @@ void SpaceColonizationPreset::applyKeyActivityInjection(double now)
     if (!reactive_enabled_ || !key_activity_provider_)
         return;
 
+    // Check if we have any live nodes (opacity > 0)
+    bool has_live_nodes = false;
+    for (const auto& n : nodes_) {
+        if (n.opacity > 0.01) {
+            has_live_nodes = true;
+            break;
+        }
+    }
+
     auto events = key_activity_provider_->recentEvents(0.1);
     for (const auto& ev : events) {
         if (ev.key_index >= xs_.size())
@@ -107,10 +116,12 @@ void SpaceColonizationPreset::applyKeyActivityInjection(double now)
         double kx = xs_[ev.key_index];
         double ky = ys_[ev.key_index];
 
-        if (nodes_.empty()) {
-            // DYNAMIC ROOT: If the board is empty, this press is the seed.
-            // Node: {pos}, parent, thickness, dist, birth, opacity, strength
+        if (!has_live_nodes) {
+            // DYNAMIC ROOT: If no live nodes, this press is the seed.
+            nodes_.clear();  // Clear dead nodes
+            attractors_.clear();
             nodes_.push_back({ { kx, ky }, -1, thickness_base_, 0.0, now, 1.0, 2.0 });
+            has_live_nodes = true;  // Now we have a live node
         } else {
             // DYNAMIC TARGET: Add the exact key coordinate as an attractor.
             // We add 2-3 slightly offset points to give the vine a "cloud" to find.
