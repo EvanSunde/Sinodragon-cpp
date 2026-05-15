@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -13,6 +14,7 @@ namespace kb::cfg {
 
 class EffectEngine;
 class KeyboardModel;
+class ConfigWatcher;
 
 class ConfiguratorCLI {
 public:
@@ -30,6 +32,10 @@ public:
     void applyPresetMask(std::size_t index, const std::vector<bool>& mask);
     void applyPresetParameter(std::size_t index, const std::string& key, const std::string& value);
     void refreshRender();
+
+    // Config Watch Interface
+    void setConfigPath(const std::string& config_path);
+    bool isConfigChanged() const;
 
     // REMOVED LEGACY METHODS:
     // void applyPresetEnable(std::size_t index, bool enabled);
@@ -52,6 +58,13 @@ private:
     std::thread render_thread_;
     std::chrono::steady_clock::time_point start_time_;
 
+    // Config Watch State
+    std::unique_ptr<ConfigWatcher> config_watcher_;
+    std::thread config_watch_thread_;
+    std::atomic<bool> config_watch_enabled_;
+    std::atomic<bool> config_changed_;
+    std::mutex config_watch_mutex_;
+
     // Internal Helpers
     void printBanner() const;
     void printHelp() const;
@@ -61,6 +74,11 @@ private:
     bool togglePreset(std::size_t index);
     bool setPresetParameter(std::size_t index, const std::string& key, const std::string& value);
     void handleSnakeCommand(const std::string& arg);
+    void handleWatchCommand(const std::string& arg);
+
+    // Config watch management
+    void startConfigWatch();
+    void stopConfigWatch();
 
     // Rendering logic
     bool engineHasAnimated() const;

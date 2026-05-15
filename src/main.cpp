@@ -1,11 +1,9 @@
 #include <exception>
 #include <iostream>
-#include <atomic>
 #include <thread>
 #include <chrono>
 
 #include "keyboard_configurator/config_loader.hpp"
-#include "keyboard_configurator/config_watcher.hpp"
 #include "keyboard_configurator/configurator_cli.hpp"
 #include "keyboard_configurator/effect_engine.hpp"
 #include "keyboard_configurator/retry_helper.hpp"
@@ -27,7 +25,6 @@
 #include "keyboard_configurator/snake_preset.hpp"
 
 using kb::cfg::ConfigLoader;
-using kb::cfg::ConfigWatcher;
 using kb::cfg::ConfiguratorCLI;
 using kb::cfg::DeviceTransport;
 using kb::cfg::DoomFirePreset;
@@ -116,21 +113,8 @@ int main(int argc, char** argv)
                 std::move(runtime.preset_parameters),
                 runtime.frame_interval);
 
-            // Flag to signal config change detected
-            std::atomic<bool> config_changed(false);
-
-            // Start config watcher thread
-            ConfigWatcher watcher(config_path);
-            std::thread config_watch_thread([&watcher, &config_changed]() {
-                while (!config_changed.load()) {
-                    std::this_thread::sleep_for(std::chrono::seconds(1));
-                    if (watcher.hasChanged()) {
-                        config_changed.store(true);
-                        // Interrupt stdin by sending newline-like signal
-                        std::cerr << "\n[ConfigWatcher] Config file changed. Reloading...\n";
-                    }
-                }
-            });
+            // Set config path for optional watching
+            cli.setConfigPath(config_path);
 
             std::unique_ptr<KeyActivityWatcher> key_watcher;
             if (runtime.model.hasKeycodeMap()) {
@@ -168,14 +152,12 @@ int main(int argc, char** argv)
                 shortcuts->stop();
             }
 
-            config_watch_thread.join();
-
-            // If config changed, reload; otherwise exit
-            if (!config_changed.load()) {
+            // If config changed (user enabled watch and it detected a change), reload
+            if (cli.isConfigChanged()) {
+                std::cout << "[Main] Reloading configuration...\n";
+            } else {
                 break;
             }
-
-            std::cout << "[Main] Reloading configuration...\n";
         }
 
         return 0;

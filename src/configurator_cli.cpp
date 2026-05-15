@@ -4,6 +4,7 @@
 #include <iostream>
 #include <sstream>
 
+#include "keyboard_configurator/config_watcher.hpp"
 #include "keyboard_configurator/effect_engine.hpp"
 #include "keyboard_configurator/keyboard_model.hpp"
 
@@ -20,9 +21,12 @@ ConfiguratorCLI::ConfiguratorCLI(const KeyboardModel& model,
       preset_parameters_(std::move(preset_parameters)),
       stop_flag_(false),
       frame_interval_ms_(std::max(1, static_cast<int>(frame_interval.count()))),
-      loop_running_(false) {}
+      loop_running_(false),
+      config_watch_enabled_(false),
+      config_changed_(false) {}
 
 ConfiguratorCLI::~ConfiguratorCLI() {
+    stopConfigWatch();
     stopRenderLoop();
 }
 
@@ -39,6 +43,7 @@ void ConfiguratorCLI::printHelp() const {
               << "  set <index> <key> <val> - set preset parameter" << '\n'
               << "  frame <ms>              - set frame interval for animated presets" << '\n'
               << "  snake <start|stop>      - start or stop snake game" << '\n'
+              << "  watch <on|off>          - enable/disable config file watching" << '\n'
               << "  quit                     - exit" << '\n';
 }
 
@@ -219,6 +224,12 @@ void ConfiguratorCLI::run() {
 
     std::string line;
     while (true) {
+        // Check if config file has changed
+        if (config_changed_.load()) {
+            std::cout << "\nConfig file changed. Reloading...\n";
+            break;
+        }
+
         std::cout << "> " << std::flush;
         if (!std::getline(std::cin, line)) {
             break;
@@ -266,6 +277,13 @@ void ConfiguratorCLI::run() {
                 handleSnakeCommand(arg);
             } else {
                 std::cout << "Usage: snake <start|stop>\n";
+            }
+        } else if (cmd == "watch") {
+            std::string arg;
+            if (iss >> arg) {
+                handleWatchCommand(arg);
+            } else {
+                std::cout << "Usage: watch <on|off>\n";
             }
         } else if (cmd == "quit" || cmd == "exit") {
             break;
@@ -386,6 +404,70 @@ void ConfiguratorCLI::clearSnakeOverride()
     saved_masks_valid_ = false;
     saved_draw_list_.clear();
     saved_masks_.clear();
+}
+
+// --- CONFIG WATCH INTERFACE ---
+
+void ConfiguratorCLI::setConfigPath(const std::string& config_path) {
+    std::lock_guard<std::mutex> guard(config_watch_mutex_);
+    config_watcher_ = std::make_unique<ConfigWatcher>(config_path);
+}
+
+bool ConfiguratorCLI::isConfigChanged() const {
+    return config_changed_.load();
+}
+
+void ConfiguratorCLI::handleWatchCommand(const std::string& arg) {
+    if (arg == "on") {
+        startConfigWatch();
+    } else if (arg == "off") {
+        stopConfigWatch();
+    } else {
+        std::cout << "Usage: watch <on|off>\n";
+    }
+}
+
+void ConfiguratorCLI::startConfigWatch() {
+    if (config_watch_enabled_.load()) {
+        std::cout << "Config watch is already enabled.\n";
+        return;
+    }
+
+    if (!config_watcher_) {
+        std::cout << "Config watcher not initialized. Cannot enable watching.\n";
+        return;
+    }
+
+    config_watch_enabled_.store(true);
+    config_changed_.store(false);
+
+    config_watch_thread_ = std::thread([this]() {
+        while (config_watch_enabled_.load()) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            if (config_watcher_ && config_watcher_->hasChanged()) {
+                config_changed_.store(true);
+                break;
+            }
+        }
+    });
+
+    std::cout << "Config file watching enabled.\n";
+}
+
+void ConfiguratorCLI::stopConfigWatch() {
+    if (!config_watch_enabled_.load()) {
+        std::cout << "Config watch is already disabled.\n";
+        return;
+    }
+
+    config_watch_enabled_.store(false);
+    if (config_watch_thread_.joinable()) {
+        config_watch_thread_.join();
+        config_watch_thread_ = std::thread();
+    }
+
+    config_changed_.store(false);
+    std::cout << "Config file watching disabled.\n";
 }
 
 }  // namespace kb::cfg
