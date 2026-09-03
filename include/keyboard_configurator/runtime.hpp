@@ -113,10 +113,13 @@ private:
     std::string cmdWatch(const std::string& arg);
     std::string cmdBrightness(const std::string& arg);
     std::string cmdReload();
-    std::string cmdSnake(const std::string& arg);
+    std::string cmdGame(const std::string& args);
+    std::string listGames();
 
-    void applySnakeOverrideLocked(std::size_t snake_index);
-    void clearSnakeOverrideLocked();
+    // A running game owns the whole keyboard; these save and restore the
+    // composition it interrupted.
+    void applyGameOverrideLocked(std::size_t game_index);
+    void clearGameOverrideLocked();
 
     // Reports whether a freshly loaded config still describes the device we
     // already have open.
@@ -162,7 +165,8 @@ private:
     std::vector<std::size_t> current_draw_list_;
     std::vector<std::vector<bool>> current_masks_;
 
-    bool snake_override_active_{false};
+    bool game_override_active_{false};
+    std::string active_game_;
     std::vector<std::size_t> saved_draw_list_;
     std::vector<std::vector<bool>> saved_masks_;
     bool saved_state_valid_{false};

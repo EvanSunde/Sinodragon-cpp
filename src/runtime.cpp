@@ -8,7 +8,7 @@
 
 #include "keyboard_configurator/config_watcher.hpp"
 #include "keyboard_configurator/retry_helper.hpp"
-#include "keyboard_configurator/snake_preset.hpp"
+#include "keyboard_configurator/game_preset.hpp"
 
 namespace kb::cfg {
 
@@ -204,7 +204,7 @@ bool Runtime::applyProfileLocked(const std::string& profile) {
 
     active_profile_ = profile;
 
-    if (snake_override_active_) {
+    if (game_override_active_) {
         // A game owns the display; remember what to go back to instead.
         saved_draw_list_ = order->second;
         saved_masks_ = resized;
@@ -303,7 +303,7 @@ void Runtime::activateProfile(const std::string& profile) {
 void Runtime::setDrawList(const std::vector<std::size_t>& list) {
     {
         std::lock_guard<std::mutex> guard(engine_mutex_);
-        if (snake_override_active_) {
+        if (game_override_active_) {
             saved_draw_list_ = list;
             saved_state_valid_ = true;
         } else {
@@ -317,7 +317,7 @@ void Runtime::setDrawList(const std::vector<std::size_t>& list) {
 void Runtime::applyPresetMasks(const std::vector<std::vector<bool>>& masks) {
     {
         std::lock_guard<std::mutex> guard(engine_mutex_);
-        if (snake_override_active_) {
+        if (game_override_active_) {
             saved_masks_ = masks;
             saved_state_valid_ = true;
         } else {
@@ -334,7 +334,7 @@ void Runtime::applyPresetMask(std::size_t index, const std::vector<bool>& mask) 
         if (index >= engine_.presetCount()) {
             return;
         }
-        if (snake_override_active_) {
+        if (game_override_active_) {
             saved_masks_.resize(engine_.presetCount(), std::vector<bool>(model_.keyCount(), true));
             saved_masks_[index] = mask;
             saved_state_valid_ = true;
@@ -420,7 +420,8 @@ std::string Runtime::reload() {
 
         // Preset indices are rebuilt from scratch, so any override or cached
         // composition pointing at the old ones has to go.
-        snake_override_active_ = false;
+        game_override_active_ = false;
+        active_game_.clear();
         saved_state_valid_ = false;
         saved_draw_list_.clear();
         saved_masks_.clear();
@@ -476,7 +477,8 @@ std::string Runtime::execute(const std::string& line) {
                "  set <index> <key> <value> set a preset parameter\n"
                "  frame <ms>                animation frame interval\n"
                "  brightness [0-100]        get or set master brightness\n"
-               "  snake <start|stop>        start or stop the snake game\n"
+               "  game list                 list configured games\n"
+               "  game <name> <start|stop>  run a game (snake, tetris, pong, life)\n"
                "  reload                    re-read the config file in place\n"
                "  watch <on|off>            watch the config file for changes\n"
                "  quit                      shut the daemon down";
@@ -508,8 +510,12 @@ std::string Runtime::execute(const std::string& line) {
     if (cmd == "reload") {
         return cmdReload();
     }
+    if (cmd == "game") {
+        return cmdGame(args);
+    }
     if (cmd == "snake") {
-        return cmdSnake(args);
+        // Kept as an alias; `game snake start` is the general form.
+        return cmdGame("snake " + (args.empty() ? std::string("start") : args));
     }
     if (cmd == "watch") {
         return cmdWatch(args);
@@ -535,6 +541,9 @@ std::string Runtime::describeStatus() {
     out << "animated:  " << (engine_.hasAnimatedEnabled() ? "yes" : "no") << '\n';
     out << "interval:  " << frame_interval_ms_.load() << " ms\n";
     out << "brightness: " << brightness_.load() << "%\n";
+    if (!active_game_.empty()) {
+        out << "game:      " << active_game_ << '\n';
+    }
     out << "watching:  " << (config_watch_enabled_.load() ? config_path_ : std::string("off"));
     return out.str();
 }
@@ -672,62 +681,116 @@ std::string Runtime::cmdBrightness(const std::string& arg) {
     return "Brightness set to " + std::to_string(value) + "%";
 }
 
-std::string Runtime::cmdSnake(const std::string& arg) {
-    if (arg != "start" && arg != "stop") {
-        return "Usage: snake <start|stop>";
+std::string Runtime::listGames() {
+    std::lock_guard<std::mutex> guard(engine_mutex_);
+    std::vector<std::string> names;
+    for (std::size_t i = 0; i < engine_.presetCount(); ++i) {
+        if (auto* game = dynamic_cast<GamePreset*>(&engine_.presetAt(i))) {
+            names.push_back(game->gameName() + (game->isGameRunning() ? "  <- running" : ""));
+        }
+    }
+    if (names.empty()) {
+        return "No games configured. Add a profile layer with type = \"snake\", \"tetris\", "
+               "\"pong\" or \"life\".";
+    }
+    std::sort(names.begin(), names.end());
+
+    std::ostringstream out;
+    out << "Games:";
+    for (const auto& name : names) {
+        out << "\n  " << name;
+    }
+    return out.str();
+}
+
+std::string Runtime::cmdGame(const std::string& args) {
+    const auto [first, second] = splitCommand(args);
+
+    if (first.empty() || first == "list") {
+        return listGames();
+    }
+
+    // `game stop` with no name stops whatever is running.
+    const bool stop_anything = (first == "stop" && second.empty());
+    const std::string name = stop_anything ? std::string{} : first;
+    const std::string action = stop_anything ? std::string("stop")
+                                             : (second.empty() ? std::string("start") : second);
+
+    if (action != "start" && action != "stop") {
+        return "Usage: game <name> <start|stop>, game stop, or game list";
     }
 
     std::string reply;
     {
         std::lock_guard<std::mutex> guard(engine_mutex_);
-        std::size_t snake_index = 0;
-        SnakePreset* snake = nullptr;
+
+        GamePreset* target = nullptr;
+        std::size_t target_index = 0;
         for (std::size_t i = 0; i < engine_.presetCount(); ++i) {
-            if (auto* candidate = dynamic_cast<SnakePreset*>(&engine_.presetAt(i))) {
-                snake = candidate;
-                snake_index = i;
+            auto* game = dynamic_cast<GamePreset*>(&engine_.presetAt(i));
+            if (game == nullptr) {
+                continue;
+            }
+            if (stop_anything ? game->isGameRunning() : game->gameName() == name) {
+                target = game;
+                target_index = i;
                 break;
             }
         }
-        if (snake == nullptr) {
-            return "No snake preset configured. Add a profile layer with type = \"snake\".";
+
+        if (target == nullptr) {
+            if (stop_anything) {
+                return "No game is running.";
+            }
+            return "No '" + name + "' preset configured. Add a profile layer with type = \"" + name +
+                   "\".";
         }
 
-        if (arg == "start") {
-            snake->start(model_);
-            engine_.setPresetEnabled(snake_index, true);
-            applySnakeOverrideLocked(snake_index);
-            reply = "Snake started. Arrow keys steer; Enter restarts after a crash.";
+        if (action == "start") {
+            // Only one game at a time: the display is exclusive.
+            for (std::size_t i = 0; i < engine_.presetCount(); ++i) {
+                auto* other = dynamic_cast<GamePreset*>(&engine_.presetAt(i));
+                if (other != nullptr && other != target && other->isGameRunning()) {
+                    other->stopGame();
+                    engine_.setPresetEnabled(i, false);
+                }
+            }
+            target->startGame(model_);
+            engine_.setPresetEnabled(target_index, true);
+            applyGameOverrideLocked(target_index);
+            active_game_ = target->gameName();
+            reply = "Started " + target->gameName() + ".";
         } else {
-            snake->stop();
-            engine_.setPresetEnabled(snake_index, false);
-            clearSnakeOverrideLocked();
-            reply = "Snake stopped.";
+            target->stopGame();
+            engine_.setPresetEnabled(target_index, false);
+            clearGameOverrideLocked();
+            reply = "Stopped " + target->gameName() + ".";
+            active_game_.clear();
         }
     }
     wake();
     return reply;
 }
 
-void Runtime::applySnakeOverrideLocked(std::size_t snake_index) {
-    if (!snake_override_active_) {
+void Runtime::applyGameOverrideLocked(std::size_t game_index) {
+    if (!game_override_active_) {
         saved_draw_list_ = current_draw_list_;
         saved_masks_ = current_masks_;
         saved_state_valid_ = true;
-        snake_override_active_ = true;
+        game_override_active_ = true;
     }
 
-    const std::vector<std::size_t> only = {snake_index};
+    const std::vector<std::size_t> only = {game_index};
     engine_.setDrawList(only);
     current_draw_list_ = only;
-    engine_.setPresetMask(snake_index, std::vector<bool>(model_.keyCount(), true));
+    engine_.setPresetMask(game_index, std::vector<bool>(model_.keyCount(), true));
 }
 
-void Runtime::clearSnakeOverrideLocked() {
-    if (!snake_override_active_) {
+void Runtime::clearGameOverrideLocked() {
+    if (!game_override_active_) {
         return;
     }
-    snake_override_active_ = false;
+    game_override_active_ = false;
 
     if (saved_state_valid_) {
         if (saved_masks_.size() == engine_.presetCount()) {

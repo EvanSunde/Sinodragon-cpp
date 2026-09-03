@@ -142,10 +142,16 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Let scripts branch on failure without parsing prose.
-    if (reply.rfind("Unknown command", 0) == 0 || reply.rfind("Usage:", 0) == 0 ||
-        reply.rfind("No such profile", 0) == 0 || reply.rfind("Invalid ", 0) == 0) {
-        return 1;
+    // Let scripts branch on failure without parsing prose. The daemon starts
+    // every rejection with one of these.
+    static const char* kFailurePrefixes[] = {
+        "Unknown command", "Usage:", "No such profile", "Invalid ",
+        "No '",            "No game", "Rejected:",      "Reload failed",
+    };
+    for (const char* prefix : kFailurePrefixes) {
+        if (reply.rfind(prefix, 0) == 0) {
+            return 1;
+        }
     }
     return 0;
 }

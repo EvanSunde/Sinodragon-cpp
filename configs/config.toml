@@ -440,6 +440,43 @@
       step_interval = 0.18
       type = "snake"
 
+  # Games are loaded on demand: `sinoctl game tetris start` takes the keyboard
+  # over and `game stop` hands it back to whatever profile was showing.
+  [profiles.tetris_game]
+
+    [[profiles.tetris_game.layers]]
+      step_interval = 0.4
+      type = "tetris"
+
+  [profiles.pong_game]
+
+    [[profiles.pong_game.layers]]
+      ball_speed = 6.0
+      ai_speed = 4.5
+      paddle_height = 2.0
+      type = "pong"
+
+  [profiles.life_game]
+
+    [[profiles.life_game.layers]]
+      step_interval = 0.25
+      density = 0.3
+      type = "life"
+
+  # Not a game -- a layer. Stack it over a dim base to see where you type.
+  [profiles.heatmap]
+
+    [[profiles.heatmap.layers]]
+      type = "static_color"
+      color = "#050505"
+
+    [[profiles.heatmap.layers]]
+      type = "typing_heatmap"
+      half_life = 15.0
+      gain = 0.3
+      spread = 0.2
+      blend = "screen"
+
 [shortcuts]
   [shortcuts.default]
     win = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "L", "R", "Tab", "V", "Period", "A", "N", "Slash", "K", "M", "G", "J", "L", "Q", "D", "F", "S", "Enter", "T", "E", "R", "C", "I", "Minus", "Equal", "Shift", "Ctrl", "Left", "Up", "Down", "Right", "Win", "Alt"]

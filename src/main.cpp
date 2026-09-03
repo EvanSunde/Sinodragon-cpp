@@ -22,7 +22,11 @@
 #include "keyboard_configurator/shortcut_watcher.hpp"
 #include "keyboard_configurator/window_source.hpp"
 #include "keyboard_configurator/smoke_preset.hpp"
+#include "keyboard_configurator/life_preset.hpp"
+#include "keyboard_configurator/pong_preset.hpp"
 #include "keyboard_configurator/snake_preset.hpp"
+#include "keyboard_configurator/tetris_preset.hpp"
+#include "keyboard_configurator/typing_heatmap_preset.hpp"
 #include "keyboard_configurator/space_colonization_preset.hpp"
 #include "keyboard_configurator/star_matrix_preset.hpp"
 #include "keyboard_configurator/static_color_preset.hpp"
@@ -46,6 +50,10 @@ PresetRegistry buildRegistry() {
     registry.registerPreset("doom_fire", [] { return std::make_unique<DoomFirePreset>(); });
     registry.registerPreset("reactive_ripple", [] { return std::make_unique<ReactiveRipplePreset>(); });
     registry.registerPreset("snake", [] { return std::make_unique<SnakePreset>(); });
+    registry.registerPreset("tetris", [] { return std::make_unique<TetrisPreset>(); });
+    registry.registerPreset("pong", [] { return std::make_unique<PongPreset>(); });
+    registry.registerPreset("life", [] { return std::make_unique<LifePreset>(); });
+    registry.registerPreset("typing_heatmap", [] { return std::make_unique<TypingHeatmapPreset>(); });
     return registry;
 }
 

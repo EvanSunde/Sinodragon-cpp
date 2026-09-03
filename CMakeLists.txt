@@ -59,6 +59,11 @@ add_library(keyboard_configurator STATIC
     src/reactive_ripple_preset.cpp
     src/space_colonization_preset.cpp
     src/snake_preset.cpp
+    src/game_preset.cpp
+    src/tetris_preset.cpp
+    src/pong_preset.cpp
+    src/life_preset.cpp
+    src/typing_heatmap_preset.cpp
     src/effect_engine.cpp
     src/runtime.cpp
     src/app_options.cpp
