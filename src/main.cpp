@@ -1,11 +1,15 @@
+#include <chrono>
 #include <exception>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 
+#include "keyboard_configurator/app_options.hpp"
 #include "keyboard_configurator/config_loader.hpp"
 #include "keyboard_configurator/configurator_cli.hpp"
 #include "keyboard_configurator/runtime.hpp"
+#include "keyboard_configurator/shutdown_signal.hpp"
 
 #include "keyboard_configurator/doom_fire_preset.hpp"
 #include "keyboard_configurator/hyprland_watcher.hpp"
@@ -26,6 +30,8 @@ using namespace kb::cfg;
 
 namespace {
 
+constexpr const char* kVersion = "0.2.0";
+
 PresetRegistry buildRegistry() {
     PresetRegistry registry;
     registry.registerPreset("static_color", [] { return std::make_unique<StaticColorPreset>(); });
@@ -42,22 +48,40 @@ PresetRegistry buildRegistry() {
     return registry;
 }
 
+// Daemon mode has no prompt to sit in, so it just waits until something asks
+// it to stop: a signal, a control-socket quit, or a config change.
+void waitForShutdown(const Runtime& runtime) {
+    while (!shutdownRequested() && !runtime.shouldQuit() && !runtime.configChanged()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+    const AppOptions options = parseArgs(argc, argv);
+
+    if (!options.valid) {
+        std::cerr << "kb_configurator: " << options.error << "\n\n" << usageText() << '\n';
+        return 2;
+    }
+    if (options.show_help) {
+        std::cout << usageText() << '\n';
+        return 0;
+    }
+    if (options.show_version) {
+        std::cout << "kb_configurator " << kVersion << '\n';
+        return 0;
+    }
+
+    installShutdownHandlers();
+
     try {
         const auto registry = buildRegistry();
         ConfigLoader loader(registry);
 
-        std::string config_path = "configs/config.toml";
-        if (argc > 1) {
-            config_path = argv[1];
-        }
-
-        // Reloading rebuilds the whole runtime; the loop is what lets the
-        // config watcher restart the session in place of the process.
         while (true) {
-            Runtime runtime(loader.loadFromFile(config_path), config_path);
+            Runtime runtime(loader.loadFromFile(options.config_path), options.config_path);
 
             if (!runtime.connect()) {
                 throw std::runtime_error("Failed to connect to device after retries");
@@ -89,8 +113,13 @@ int main(int argc, char** argv) {
                 hypr->start();
             }
 
-            ConfiguratorCLI cli(runtime);
-            cli.run();
+            if (options.daemon) {
+                std::cout << "[Main] Running in daemon mode; send SIGTERM to stop.\n" << std::flush;
+                waitForShutdown(runtime);
+            } else {
+                ConfiguratorCLI cli(runtime);
+                cli.run();
+            }
 
             if (key_watcher) {
                 key_watcher->stop();
@@ -102,7 +131,17 @@ int main(int argc, char** argv) {
                 shortcuts->stop();
             }
 
-            const bool reload = runtime.configChanged() && !runtime.shouldQuit();
+            const bool reload = runtime.configChanged() && !runtime.shouldQuit() && !shutdownRequested();
+
+            if (!reload) {
+                // Leave the keyboard dark rather than frozen on the last frame
+                // the daemon happened to render.
+                if (shutdownRequested()) {
+                    std::cout << "[Main] Signal " << shutdownSignal() << "; shutting down.\n";
+                }
+                runtime.blank();
+            }
+
             runtime.stop();
 
             if (!reload) {

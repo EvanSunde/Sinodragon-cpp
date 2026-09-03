@@ -60,6 +60,8 @@ add_library(keyboard_configurator STATIC
     src/snake_preset.cpp
     src/effect_engine.cpp
     src/runtime.cpp
+    src/app_options.cpp
+    src/shutdown_signal.cpp
     src/config_loader.cpp
     src/configurator_cli.cpp
     src/hyprland_watcher.cpp
@@ -97,3 +99,14 @@ target_link_libraries(kb_configurator
     PRIVATE
         keyboard_configurator
 )
+
+find_package(Threads REQUIRED)
+target_link_libraries(keyboard_configurator PUBLIC Threads::Threads)
+
+# --- Install ---
+include(GNUInstallDirs)
+install(TARGETS kb_configurator RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES packaging/99-sinodragon.rules
+        DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/udev/rules.d)
+install(FILES packaging/sinodragon.service
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/user)

@@ -8,6 +8,7 @@
 
 #include "keyboard_configurator/keyboard_model.hpp"
 #include "keyboard_configurator/runtime.hpp"
+#include "keyboard_configurator/shutdown_signal.hpp"
 
 namespace kb::cfg {
 
@@ -27,7 +28,7 @@ void ConfiguratorCLI::run() {
     std::string line;
     bool prompt_needed = true;
 
-    while (!runtime_.shouldQuit() && !runtime_.configChanged()) {
+    while (!runtime_.shouldQuit() && !runtime_.configChanged() && !shutdownRequested()) {
         if (prompt_needed) {
             std::cout << "> " << std::flush;
             prompt_needed = false;
