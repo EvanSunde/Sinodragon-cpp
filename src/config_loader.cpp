@@ -22,6 +22,7 @@
 
 #include "keyboard_configurator/hidapi_transport.hpp"
 #include "keyboard_configurator/logging_transport.hpp"
+#include "keyboard_configurator/preview_transport.hpp"
 
 namespace kb::cfg {
 
@@ -153,7 +154,9 @@ std::vector<int> readKeycodeCsv(const std::filesystem::path& path,
 std::unique_ptr<DeviceTransport> createTransport(const std::string& id) {
     if (id == "logging") return std::make_unique<LoggingTransport>();
     if (id == "hidapi") return std::make_unique<HidapiTransport>();
-    throw std::runtime_error("Unsupported transport: " + id);
+    if (id == "preview") return std::make_unique<PreviewTransport>();
+    throw std::runtime_error("Unsupported transport '" + id +
+                             "' (expected hidapi, preview or logging)");
 }
 
 // --- Helper: Parse Modifiers ---
@@ -203,7 +206,10 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     uint32_t fps = device["frame_interval_ms"].value_or(33);
     int brightness = device["brightness"].value_or(100);
     bool config_watch_mode = device["config_watch_mode"].value_or(false);
-    std::string transport = device["transport"].value_or("hidapi");
+    auto preview_transpose = device["preview_transpose"].value<bool>();
+    std::string transport = forced_transport_.empty()
+                                ? device["transport"].value_or(std::string{"hidapi"})
+                                : forced_transport_;
     
     std::filesystem::path layout_path = root_dir / device["layout"].value_or("");
     std::filesystem::path keycodes_path = root_dir / device["keycodes"].value_or("");
@@ -221,6 +227,11 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     };
     config.brightness = std::clamp(brightness, 0, 100);
     config.config_watch_mode = config_watch_mode;
+    if (preview_transpose) {
+        if (auto* preview = dynamic_cast<PreviewTransport*>(config.transport.get())) {
+            preview->setTranspose(*preview_transpose);
+        }
+    }
 
     if (std::filesystem::exists(keycodes_path)) {
          config.model.setKeycodeMap(readKeycodeCsv(keycodes_path, layout));

@@ -81,8 +81,13 @@ public:
     explicit ConfigLoader(const PresetRegistry& registry);
     [[nodiscard]] RuntimeConfig loadFromFile(const std::string& path) const;
 
+    // Overrides the config's transport, so --preview works against any config
+    // without editing it.
+    void forceTransport(std::string transport_id) { forced_transport_ = std::move(transport_id); }
+
 private:
     const PresetRegistry& registry_;
+    std::string forced_transport_;
 };
 
 }  // namespace kb::cfg

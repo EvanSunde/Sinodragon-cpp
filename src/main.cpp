@@ -80,6 +80,9 @@ int main(int argc, char** argv) {
     try {
         const auto registry = buildRegistry();
         ConfigLoader loader(registry);
+        if (options.preview) {
+            loader.forceTransport("preview");
+        }
 
         while (true) {
             Runtime runtime(loader.loadFromFile(options.config_path), options.config_path, loader);

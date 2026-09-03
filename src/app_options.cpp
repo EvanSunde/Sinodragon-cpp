@@ -46,6 +46,11 @@ AppOptions parseArgs(int argc, char** argv) {
             options.show_help = true;
         } else if (arg == "-v" || arg == "--version") {
             options.show_version = true;
+        } else if (arg == "-p" || arg == "--preview") {
+            options.preview = true;
+            // The preview redraws in place; sharing the terminal with the
+            // interactive prompt would leave both garbled.
+            options.daemon = true;
         } else if (arg == "--no-socket") {
             options.enable_socket = false;
         } else if (arg == "-s" || arg == "--socket") {
@@ -88,6 +93,8 @@ std::string usageText() {
            "Options:\n"
            "  -c, --config <path>   Config file to load\n"
            "  -d, --daemon          Run without the interactive prompt\n"
+           "  -p, --preview         Draw frames in the terminal instead of\n"
+           "                        sending them to the keyboard (implies --daemon)\n"
            "  -s, --socket <path>   Control socket to listen on\n"
            "                        (default: $XDG_RUNTIME_DIR/sinodragon.sock)\n"
            "      --no-socket       Do not listen for control commands\n"

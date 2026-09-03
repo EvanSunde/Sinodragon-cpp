@@ -73,6 +73,7 @@ add_library(keyboard_configurator STATIC
     src/json_lite.cpp
     src/shortcut_watcher.cpp
     src/logging_transport.cpp
+    src/preview_transport.cpp
     src/hidapi_transport.cpp
 )
 
