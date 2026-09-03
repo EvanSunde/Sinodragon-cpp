@@ -182,16 +182,18 @@ int main(int argc, char** argv) {
 
             const bool reload = runtime.configChanged() && !runtime.shouldQuit() && !shutdownRequested();
 
-            if (!reload) {
-                // Leave the keyboard dark rather than frozen on the last frame
-                // the daemon happened to render.
-                if (shutdownRequested()) {
-                    std::cout << "[Main] Signal " << shutdownSignal() << "; shutting down.\n";
-                }
-                runtime.blank();
+            if (shutdownRequested()) {
+                std::cout << "[Main] Signal " << shutdownSignal() << "; shutting down.\n";
             }
 
+            // Stop the render thread *before* blanking: otherwise the next
+            // frame it pushes lands on top of the black one and the keyboard
+            // stays lit after we exit.
             runtime.stop();
+
+            if (!reload) {
+                runtime.blank();
+            }
 
             if (!reload) {
                 break;
