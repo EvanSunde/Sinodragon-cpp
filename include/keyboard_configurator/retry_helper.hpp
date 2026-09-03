@@ -66,6 +66,8 @@ public:
         return false;
     }
 
+    [[nodiscard]] const Config& config() const noexcept { return config_; }
+
 private:
     int calculateDelay(int attempt_index) const {
         // Calculate exponential backoff: initial_delay * (multiplier ^ attempt_index)
@@ -80,6 +82,49 @@ private:
     }
 
     Config config_;
+};
+
+/**
+ * Non-blocking counterpart to RetryHelper, for callers that cannot afford to
+ * sleep -- the render thread, for instance, must keep ticking while the device
+ * is away. Shares the same backoff policy: ask ready() whether it is time for
+ * the next attempt, then report the outcome.
+ */
+class Backoff {
+public:
+    using Clock = std::chrono::steady_clock;
+
+    explicit Backoff(const RetryHelper::Config& config = RetryHelper::Config())
+        : config_(config) {}
+
+    [[nodiscard]] bool ready(Clock::time_point now = Clock::now()) const {
+        return now >= next_attempt_;
+    }
+
+    void recordFailure(Clock::time_point now = Clock::now()) {
+        double delay = config_.initial_delay_ms * std::pow(config_.backoff_multiplier, attempt_);
+        if (delay > config_.max_delay_ms) {
+            delay = config_.max_delay_ms;
+        }
+        current_delay_ = std::chrono::milliseconds(static_cast<int>(delay));
+        next_attempt_ = now + current_delay_;
+        ++attempt_;
+    }
+
+    void reset() {
+        attempt_ = 0;
+        current_delay_ = std::chrono::milliseconds(0);
+        next_attempt_ = Clock::time_point{};
+    }
+
+    [[nodiscard]] std::chrono::milliseconds currentDelay() const noexcept { return current_delay_; }
+    [[nodiscard]] int attempts() const noexcept { return attempt_; }
+
+private:
+    RetryHelper::Config config_;
+    int attempt_{0};
+    std::chrono::milliseconds current_delay_{0};
+    Clock::time_point next_attempt_{};
 };
 
 }  // namespace kb::cfg

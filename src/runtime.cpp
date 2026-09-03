@@ -345,7 +345,8 @@ std::string Runtime::describeStatus() {
     std::lock_guard<std::mutex> guard(engine_mutex_);
     out << "device:    " << model_.name() << " (" << std::hex << model_.vendorId() << ':'
         << model_.productId() << std::dec << ")\n";
-    out << "transport: " << transport_->id() << '\n';
+    out << "transport: " << transport_->id()
+        << (transport_->isConnected() ? " (connected)" : " (disconnected, retrying)") << '\n';
     out << "keys:      " << model_.keyCount() << '\n';
     out << "presets:   " << engine_.presetCount() << '\n';
     out << "profile:   " << (active_profile_.empty() ? "(none)" : active_profile_) << '\n';
