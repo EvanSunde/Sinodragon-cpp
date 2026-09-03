@@ -26,15 +26,15 @@ std::string getenv_or(const char* key, const char* fallback) {
 }
 }
 
-HyprlandWatcher::HyprlandWatcher(HyprConfig cfg, Runtime& runtime, std::size_t preset_count)
-    : cfg_(std::move(cfg)), runtime_(runtime), preset_count_(preset_count) {}
+HyprlandWatcher::HyprlandWatcher(std::string events_socket, Runtime& runtime)
+    : events_socket_(std::move(events_socket)), runtime_(runtime) {}
 
 HyprlandWatcher::~HyprlandWatcher() { stop(); }
 
 void HyprlandWatcher::start() {
     if (thread_.joinable()) return;
     stop_.store(false);
-    std::string sock = cfg_.events_socket.empty() ? autoDetectEventsSocket() : cfg_.events_socket;
+    std::string sock = events_socket_.empty() ? autoDetectEventsSocket() : events_socket_;
     thread_ = std::thread(&HyprlandWatcher::runLoop, this, sock);
 }
 
@@ -140,18 +140,9 @@ void HyprlandWatcher::runLoop(std::string socket_path) {
                         continue;
                     }
 
-                    // Hand the profile name to the runtime, which owns the
-                    // draw list and the masks and knows how to size them.
-                    std::string prof;
-                    auto pit = cfg_.class_to_profile.find(appClass);
-                    if (pit != cfg_.class_to_profile.end()) {
-                        prof = pit->second;
-                    } else {
-                        prof = cfg_.default_profile;
-                    }
-                    if (!prof.empty()) {
-                        runtime_.activateProfile(prof);
-                    }
+                    // The runtime resolves class -> profile against the live
+                    // config, so this stays correct across a hot reload.
+                    runtime_.activateProfileForWindow(appClass);
                 }
             }
         }

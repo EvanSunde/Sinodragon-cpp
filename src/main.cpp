@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
         ConfigLoader loader(registry);
 
         while (true) {
-            Runtime runtime(loader.loadFromFile(options.config_path), options.config_path);
+            Runtime runtime(loader.loadFromFile(options.config_path), options.config_path, loader);
 
             if (!runtime.connect()) {
                 throw std::runtime_error("Failed to connect to device after retries");
@@ -105,10 +105,15 @@ int main(int argc, char** argv) {
                                                                  runtime.model().keyCount());
                     shortcuts->start();
                 }
-                hypr = std::make_unique<HyprlandWatcher>(hypr_config, runtime, runtime.presetCount());
+                hypr = std::make_unique<HyprlandWatcher>(hypr_config.events_socket, runtime);
                 if (shortcuts) {
                     hypr->setActiveClassCallback([watcher = shortcuts.get()](const std::string& klass) {
                         return watcher->setActiveClass(klass);
+                    });
+                    // A reload rebuilds the shortcut tables in place rather
+                    // than restarting the evdev watcher.
+                    runtime.setConfigObserver([watcher = shortcuts.get()](const HyprConfig& updated) {
+                        watcher->reconfigure(updated);
                     });
                 }
                 hypr->start();

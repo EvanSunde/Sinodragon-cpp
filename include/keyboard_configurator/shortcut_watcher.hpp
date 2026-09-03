@@ -33,10 +33,14 @@ public:
     // Returns true if shortcuts are currently ENGAGED (overlay active)
     bool setActiveClass(const std::string& klass);
 
+    // Swaps in a freshly loaded config and recompiles the combo tables, so a
+    // hot reload does not need the evdev thread restarted.
+    void reconfigure(const HyprConfig& hypr);
+
 private:
     const KeyboardModel& model_;
     Runtime& runtime_;
-    const HyprConfig hypr_;
+    HyprConfig hypr_;
     std::size_t key_count_;
 
     // Overlay Configuration
@@ -75,6 +79,7 @@ private:
     void openDevices();
     void closeDevices();
 
+    void compileShortcuts();
     void updateActiveShortcutFromClass();
     void applyMaskForMods(int modmask);
     

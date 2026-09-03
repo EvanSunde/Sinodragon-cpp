@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -27,9 +28,11 @@ namespace kb::cfg {
 //   2. engine_mutex_ must never be held while taking loop_mutex_.
 // wake() takes no lock at all, so callers holding engine_mutex_ can never
 // deadlock against the render thread.
+class ConfigLoader;
+
 class Runtime {
 public:
-    Runtime(RuntimeConfig config, std::string config_path);
+    Runtime(RuntimeConfig config, std::string config_path, const ConfigLoader& loader);
     ~Runtime();
 
     Runtime(const Runtime&) = delete;
@@ -60,7 +63,21 @@ public:
 
     void requestQuit();
 
+    // Reloads the config in place: presets, masks, styles, profiles, shortcuts
+    // and brightness are all swapped without dropping the device handle or
+    // restarting the watchers. Returns a human-readable result. If the [device]
+    // section changed in a way that needs a new handle, this flags a restart
+    // instead and configChanged() becomes true.
+    std::string reload();
+
+    // Notified after a successful reload so long-lived watchers can pick up the
+    // new shortcut tables rather than holding a stale copy.
+    void setConfigObserver(std::function<void(const HyprConfig&)> observer);
+
     // --- Applied by the window and shortcut watchers ---
+    // Resolves a window class to its profile using the *current* config, so a
+    // reload takes effect on the next window switch with no other plumbing.
+    void activateProfileForWindow(const std::string& window_class);
     void activateProfile(const std::string& profile);
     void setDrawList(const std::vector<std::size_t>& list);
     void applyPresetMasks(const std::vector<std::vector<bool>>& masks);
@@ -90,13 +107,20 @@ private:
     std::string cmdFrame(const std::string& arg);
     std::string cmdWatch(const std::string& arg);
     std::string cmdBrightness(const std::string& arg);
+    std::string cmdReload();
     std::string cmdSnake(const std::string& arg);
 
     void applySnakeOverrideLocked(std::size_t snake_index);
     void clearSnakeOverrideLocked();
 
+    // Reports whether a freshly loaded config still describes the device we
+    // already have open.
+    [[nodiscard]] static bool deviceSectionMatches(const KeyboardModel& current,
+                                                   const KeyboardModel& fresh);
+
     KeyboardModel model_;
     std::unique_ptr<DeviceTransport> transport_;
+    const ConfigLoader& loader_;
     EffectEngine engine_;
     KeyActivityProviderPtr key_activity_;
 
@@ -119,8 +143,12 @@ private:
 
     std::atomic<bool> quit_requested_{false};
 
+    std::function<void(const HyprConfig&)> config_observer_;
+    std::mutex reload_mutex_;
+
     // Config watching.
     std::thread config_watch_thread_;
+    bool watch_config_on_start_{false};
     std::atomic<bool> config_watch_enabled_{false};
     std::atomic<bool> config_changed_{false};
 

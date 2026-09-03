@@ -57,6 +57,10 @@ struct RuntimeConfig {
 
     // Master brightness as a percentage, 0-100.
     int brightness{100};
+
+    // [device] config_watch_mode: start watching the config file immediately
+    // rather than waiting for a `watch on` command.
+    bool config_watch_mode{false};
     
     std::optional<HyprConfig> hypr;
 };

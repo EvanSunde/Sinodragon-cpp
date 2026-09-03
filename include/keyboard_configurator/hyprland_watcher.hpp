@@ -15,7 +15,7 @@ class Runtime;
 
 class HyprlandWatcher {
 public:
-    HyprlandWatcher(HyprConfig cfg, Runtime& runtime, std::size_t preset_count);
+    HyprlandWatcher(std::string events_socket, Runtime& runtime);
     ~HyprlandWatcher();
 
     void start();
@@ -23,9 +23,10 @@ public:
     void setActiveClassCallback(std::function<bool(const std::string&)> cb) { on_class_ = std::move(cb); }
 
 private:
-    HyprConfig cfg_;
+    // Holds no config of its own: the runtime resolves the window class using
+    // whatever config is current, so a hot reload needs nothing done here.
+    std::string events_socket_;
     Runtime& runtime_;
-    std::size_t preset_count_;
     std::atomic<bool> stop_{false};
     std::thread thread_;
     std::string last_class_;

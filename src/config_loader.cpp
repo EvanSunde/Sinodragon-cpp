@@ -202,6 +202,7 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     size_t pkt_len = device["packet_length"].value_or(0);
     uint32_t fps = device["frame_interval_ms"].value_or(33);
     int brightness = device["brightness"].value_or(100);
+    bool config_watch_mode = device["config_watch_mode"].value_or(false);
     std::string transport = device["transport"].value_or("hidapi");
     
     std::filesystem::path layout_path = root_dir / device["layout"].value_or("");
@@ -219,6 +220,7 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         {}, {}
     };
     config.brightness = std::clamp(brightness, 0, 100);
+    config.config_watch_mode = config_watch_mode;
 
     if (std::filesystem::exists(keycodes_path)) {
          config.model.setKeycodeMap(readKeycodeCsv(keycodes_path, layout));

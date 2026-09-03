@@ -1,6 +1,7 @@
 #include "keyboard_configurator/runtime.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <iostream>
 #include <sstream>
 
@@ -49,9 +50,10 @@ bool parseIndex(const std::string& text, std::size_t& out) {
 
 }  // namespace
 
-Runtime::Runtime(RuntimeConfig config, std::string config_path)
+Runtime::Runtime(RuntimeConfig config, std::string config_path, const ConfigLoader& loader)
     : model_(std::move(config.model)),
       transport_(std::move(config.transport)),
+      loader_(loader),
       engine_(model_, *transport_),
       key_activity_(std::make_shared<KeyActivityProvider>(model_.keyCount())),
       config_path_(std::move(config_path)),
@@ -59,6 +61,7 @@ Runtime::Runtime(RuntimeConfig config, std::string config_path)
       hypr_(std::move(config.hypr)) {
     frame_interval_ms_.store(std::max(1, static_cast<int>(config.frame_interval.count())));
     brightness_.store(std::clamp(config.brightness, 0, 100));
+    watch_config_on_start_ = config.config_watch_mode;
 
     engine_.setKeyActivityProvider(key_activity_);
     engine_.setPresets(std::move(config.presets), std::move(config.preset_masks));
@@ -99,6 +102,10 @@ void Runtime::start() {
     dirty_.store(true);
     start_time_ = std::chrono::steady_clock::now();
     render_thread_ = std::thread(&Runtime::renderLoop, this);
+
+    if (watch_config_on_start_) {
+        startConfigWatch();
+    }
 }
 
 void Runtime::stop() {
@@ -211,6 +218,23 @@ bool Runtime::applyProfileLocked(const std::string& profile) {
     return true;
 }
 
+void Runtime::activateProfileForWindow(const std::string& window_class) {
+    {
+        std::lock_guard<std::mutex> guard(engine_mutex_);
+        if (!hypr_) {
+            return;
+        }
+        auto it = hypr_->class_to_profile.find(window_class);
+        const std::string profile =
+            (it != hypr_->class_to_profile.end()) ? it->second : hypr_->default_profile;
+        if (profile.empty()) {
+            return;
+        }
+        applyProfileLocked(profile);
+    }
+    wake();
+}
+
 void Runtime::activateProfile(const std::string& profile) {
     {
         std::lock_guard<std::mutex> guard(engine_mutex_);
@@ -286,6 +310,96 @@ void Runtime::refreshRender() {
     wake();
 }
 
+bool Runtime::deviceSectionMatches(const KeyboardModel& current, const KeyboardModel& fresh) {
+    return current.vendorId() == fresh.vendorId() && current.productId() == fresh.productId() &&
+           current.keyCount() == fresh.keyCount() && current.packetLength() == fresh.packetLength();
+}
+
+void Runtime::setConfigObserver(std::function<void(const HyprConfig&)> observer) {
+    std::lock_guard<std::mutex> guard(reload_mutex_);
+    config_observer_ = std::move(observer);
+}
+
+std::string Runtime::reload() {
+    // Serialised so the file watcher and a `reload` command cannot overlap.
+    std::lock_guard<std::mutex> reload_guard(reload_mutex_);
+
+    // RuntimeConfig has no default state (KeyboardModel needs a layout), so it
+    // is built inside the optional.
+    std::optional<RuntimeConfig> loaded;
+    try {
+        loaded.emplace(loader_.loadFromFile(config_path_));
+    } catch (const std::exception& ex) {
+        // A syntax error in a half-saved file must not take the lighting down.
+        return std::string("Reload failed, keeping the running config: ") + ex.what();
+    }
+    RuntimeConfig& fresh = *loaded;
+
+    if (!deviceSectionMatches(model_, fresh.model)) {
+        // A different keyboard, layout or packet size needs a new handle, which
+        // is more than an in-place swap can do. Ask main for a full restart.
+        config_changed_.store(true);
+        loop_cv_.notify_all();
+        return "The [device] section changed; restarting to reopen the device.";
+    }
+
+    std::string profile_to_apply;
+    std::size_t layer_count = 0;
+    std::optional<HyprConfig> observed;
+
+    {
+        std::lock_guard<std::mutex> guard(engine_mutex_);
+
+        engine_.setPresets(std::move(fresh.presets), std::move(fresh.preset_masks));
+        engine_.setLayerStyles(std::move(fresh.preset_styles));
+        for (std::size_t i = 0; i < fresh.preset_enabled.size(); ++i) {
+            engine_.setPresetEnabled(i, fresh.preset_enabled[i]);
+        }
+
+        preset_parameters_ = std::move(fresh.preset_parameters);
+        hypr_ = std::move(fresh.hypr);
+        brightness_.store(std::clamp(fresh.brightness, 0, 100));
+        frame_interval_ms_.store(std::max(1, static_cast<int>(fresh.frame_interval.count())));
+
+        // Preset indices are rebuilt from scratch, so any override or cached
+        // composition pointing at the old ones has to go.
+        snake_override_active_ = false;
+        saved_state_valid_ = false;
+        saved_draw_list_.clear();
+        saved_masks_.clear();
+        current_draw_list_.clear();
+        current_masks_.clear();
+
+        // Stay on the same profile across a reload when it still exists.
+        profile_to_apply = active_profile_;
+        active_profile_.clear();
+        if (hypr_) {
+            if (profile_to_apply.empty() ||
+                hypr_->profile_draw_order.find(profile_to_apply) == hypr_->profile_draw_order.end()) {
+                profile_to_apply = hypr_->default_profile;
+            }
+            observed = hypr_;
+        }
+        if (!profile_to_apply.empty()) {
+            applyProfileLocked(profile_to_apply);
+        }
+        layer_count = current_draw_list_.size();
+    }
+
+    if (observed && config_observer_) {
+        config_observer_(*observed);
+    }
+
+    wake();
+
+    std::ostringstream out;
+    out << "Reloaded " << config_path_;
+    if (!profile_to_apply.empty()) {
+        out << "; profile " << profile_to_apply << " (" << layer_count << " layers)";
+    }
+    return out.str();
+}
+
 // --- Commands --------------------------------------------------------------
 
 std::string Runtime::execute(const std::string& line) {
@@ -306,6 +420,7 @@ std::string Runtime::execute(const std::string& line) {
                "  frame <ms>                animation frame interval\n"
                "  brightness [0-100]        get or set master brightness\n"
                "  snake <start|stop>        start or stop the snake game\n"
+               "  reload                    re-read the config file in place\n"
                "  watch <on|off>            watch the config file for changes\n"
                "  quit                      shut the daemon down";
     }
@@ -332,6 +447,9 @@ std::string Runtime::execute(const std::string& line) {
     }
     if (cmd == "brightness") {
         return cmdBrightness(args);
+    }
+    if (cmd == "reload") {
+        return cmdReload();
     }
     if (cmd == "snake") {
         return cmdSnake(args);
@@ -480,6 +598,10 @@ std::string Runtime::cmdFrame(const std::string& arg) {
     return "Frame interval set to " + arg + " ms";
 }
 
+std::string Runtime::cmdReload() {
+    return reload();
+}
+
 std::string Runtime::cmdBrightness(const std::string& arg) {
     if (arg.empty()) {
         return "Brightness is " + std::to_string(brightness_.load()) + "%";
@@ -597,9 +719,12 @@ void Runtime::startConfigWatch() {
                 break;
             }
             if (watcher.hasChanged()) {
-                config_changed_.store(true);
-                loop_cv_.notify_all();
-                break;
+                // Reload in place and keep watching, rather than tearing the
+                // whole runtime down and reopening the device.
+                std::cout << '\n' << reload() << '\n' << std::flush;
+                if (config_changed_.load()) {
+                    break;  // device section changed; main will restart us
+                }
             }
         }
     });

@@ -28,27 +28,40 @@ ShortcutWatcher::ShortcutWatcher(const KeyboardModel& model,
                                  const HyprConfig& hypr,
                                  std::size_t key_count)
     : model_(model), runtime_(runtime), hypr_(hypr), key_count_(key_count) {
-    
-    if (hypr_.shortcuts_overlay_preset_index >= 0) {
-        overlay_index_ = static_cast<std::size_t>(hypr_.shortcuts_overlay_preset_index);
-        overlay_valid_ = true;
-    }
+    compileShortcuts();
+}
 
-    for (const auto& kv : hypr_.shortcuts) {
-        CompiledProfile cp;
-        for (const auto& ck : kv.second.combos) {
-            int modmask = ck.first;
+// Resolving every key label to an index up front keeps the hot path -- a
+// modifier press -- a single hash lookup.
+void ShortcutWatcher::compileShortcuts() {
+    overlay_valid_ = hypr_.shortcuts_overlay_preset_index >= 0;
+    overlay_index_ = overlay_valid_ ? static_cast<std::size_t>(hypr_.shortcuts_overlay_preset_index) : 0;
+
+    compiled_.clear();
+    for (const auto& [name, profile] : hypr_.shortcuts) {
+        CompiledProfile compiled;
+        for (const auto& [modmask, labels] : profile.combos) {
             std::vector<std::size_t> indices;
-            indices.reserve(ck.second.size());
-            for (const auto& label : ck.second) {
+            indices.reserve(labels.size());
+            for (const auto& label : labels) {
                 if (auto idx = model_.indexForKey(label)) {
                     indices.push_back(*idx);
                 }
             }
-            cp.combos.emplace(modmask, std::move(indices));
+            compiled.combos.emplace(modmask, std::move(indices));
         }
-        compiled_.emplace(kv.first, std::move(cp));
+        compiled_.emplace(name, std::move(compiled));
     }
+}
+
+void ShortcutWatcher::reconfigure(const HyprConfig& hypr) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    hypr_ = hypr;
+    compileShortcuts();
+    updateActiveShortcutFromClass();
+    // engaged_ refers to preset indices that no longer exist after a reload.
+    engaged_ = false;
+    applyMaskForMods(mods_.load());
 }
 
 ShortcutWatcher::~ShortcutWatcher() { stop(); }
