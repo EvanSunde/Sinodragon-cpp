@@ -89,6 +89,7 @@ private:
     std::string cmdSet(const std::string& args);
     std::string cmdFrame(const std::string& arg);
     std::string cmdWatch(const std::string& arg);
+    std::string cmdBrightness(const std::string& arg);
     std::string cmdSnake(const std::string& arg);
 
     void applySnakeOverrideLocked(std::size_t snake_index);
@@ -112,6 +113,8 @@ private:
     std::atomic<bool> stop_{true};
     std::atomic<bool> dirty_{true};
     std::atomic<int> frame_interval_ms_{33};
+    // Master brightness, 0-100, applied when the frame is encoded.
+    std::atomic<int> brightness_{100};
     std::chrono::steady_clock::time_point start_time_;
 
     std::atomic<bool> quit_requested_{false};

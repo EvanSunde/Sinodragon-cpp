@@ -9,6 +9,7 @@
 #include "keyboard_configurator/preset.hpp"
 #include "keyboard_configurator/key_activity.hpp"
 #include "keyboard_configurator/key_color_frame.hpp"
+#include "keyboard_configurator/types.hpp"
 
 namespace kb::cfg {
 
@@ -33,6 +34,12 @@ public:
     bool presetEnabled(std::size_t index) const;
     void setPresetMask(std::size_t index, const std::vector<bool>& mask);
     void setPresetMasks(const std::vector<std::vector<bool>>& masks, bool overlay_replace = false);
+
+    // Per-layer opacity and blend mode. A layer with the default style
+    // overwrites the keys its mask covers, which is the historical behaviour.
+    void setLayerStyles(std::vector<LayerStyle> styles);
+    void setLayerStyle(std::size_t index, const LayerStyle& style);
+    [[nodiscard]] LayerStyle layerStyle(std::size_t index) const;
 
     LightingPreset& presetAt(std::size_t index);
     const LightingPreset& presetAt(std::size_t index) const;
@@ -63,7 +70,12 @@ private:
     std::vector<std::size_t> active_draw_list_; // New List
     
     std::vector<std::vector<bool>> preset_masks_;
+    std::vector<LayerStyle> preset_styles_;
     KeyActivityProviderPtr key_activity_provider_;
+
+    // Scratch buffer for the layer currently being composited. Kept as a
+    // member so a frame costs no allocations.
+    KeyColorFrame layer_frame_;
 };
 
 }  // namespace kb::cfg

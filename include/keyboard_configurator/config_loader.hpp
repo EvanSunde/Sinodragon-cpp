@@ -53,6 +53,10 @@ struct RuntimeConfig {
     
     std::vector<std::vector<bool>> preset_masks;
     std::vector<bool> preset_enabled;
+    std::vector<LayerStyle> preset_styles;
+
+    // Master brightness as a percentage, 0-100.
+    int brightness{100};
     
     std::optional<HyprConfig> hypr;
 };

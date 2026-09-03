@@ -58,9 +58,11 @@ Runtime::Runtime(RuntimeConfig config, std::string config_path)
       preset_parameters_(std::move(config.preset_parameters)),
       hypr_(std::move(config.hypr)) {
     frame_interval_ms_.store(std::max(1, static_cast<int>(config.frame_interval.count())));
+    brightness_.store(std::clamp(config.brightness, 0, 100));
 
     engine_.setKeyActivityProvider(key_activity_);
     engine_.setPresets(std::move(config.presets), std::move(config.preset_masks));
+    engine_.setLayerStyles(std::move(config.preset_styles));
     for (std::size_t i = 0; i < config.preset_enabled.size(); ++i) {
         engine_.setPresetEnabled(i, config.preset_enabled[i]);
     }
@@ -159,7 +161,7 @@ void Runtime::renderAndPush(double time_seconds) {
     {
         std::lock_guard<std::mutex> guard(engine_mutex_);
         engine_.renderFrame(time_seconds);
-        payload = model_.encodeFrame(engine_.frame());
+        payload = model_.encodeFrame(engine_.frame(), brightness_.load() / 100.0);
     }
     // Device I/O happens outside the engine lock: a stalled USB write must
     // never block a command coming in from the CLI or the control socket.
@@ -302,6 +304,7 @@ std::string Runtime::execute(const std::string& line) {
                "  toggle <index>            toggle a preset on/off\n"
                "  set <index> <key> <value> set a preset parameter\n"
                "  frame <ms>                animation frame interval\n"
+               "  brightness [0-100]        get or set master brightness\n"
                "  snake <start|stop>        start or stop the snake game\n"
                "  watch <on|off>            watch the config file for changes\n"
                "  quit                      shut the daemon down";
@@ -326,6 +329,9 @@ std::string Runtime::execute(const std::string& line) {
     }
     if (cmd == "frame") {
         return cmdFrame(args);
+    }
+    if (cmd == "brightness") {
+        return cmdBrightness(args);
     }
     if (cmd == "snake") {
         return cmdSnake(args);
@@ -353,6 +359,7 @@ std::string Runtime::describeStatus() {
     out << "layers:    " << current_draw_list_.size() << '\n';
     out << "animated:  " << (engine_.hasAnimatedEnabled() ? "yes" : "no") << '\n';
     out << "interval:  " << frame_interval_ms_.load() << " ms\n";
+    out << "brightness: " << brightness_.load() << "%\n";
     out << "watching:  " << (config_watch_enabled_.load() ? config_path_ : std::string("off"));
     return out.str();
 }
@@ -471,6 +478,19 @@ std::string Runtime::cmdFrame(const std::string& arg) {
     frame_interval_ms_.store(static_cast<int>(interval));
     wake();
     return "Frame interval set to " + arg + " ms";
+}
+
+std::string Runtime::cmdBrightness(const std::string& arg) {
+    if (arg.empty()) {
+        return "Brightness is " + std::to_string(brightness_.load()) + "%";
+    }
+    std::size_t value = 0;
+    if (!parseIndex(arg, value) || value > 100) {
+        return "Usage: brightness <0-100>";
+    }
+    brightness_.store(static_cast<int>(value));
+    wake();
+    return "Brightness set to " + std::to_string(value) + "%";
 }
 
 std::string Runtime::cmdSnake(const std::string& arg) {

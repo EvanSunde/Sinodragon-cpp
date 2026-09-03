@@ -201,6 +201,7 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
 
     size_t pkt_len = device["packet_length"].value_or(0);
     uint32_t fps = device["frame_interval_ms"].value_or(33);
+    int brightness = device["brightness"].value_or(100);
     std::string transport = device["transport"].value_or("hidapi");
     
     std::filesystem::path layout_path = root_dir / device["layout"].value_or("");
@@ -217,6 +218,7 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         std::nullopt, std::nullopt,
         {}, {}
     };
+    config.brightness = std::clamp(brightness, 0, 100);
 
     if (std::filesystem::exists(keycodes_path)) {
          config.model.setKeycodeMap(readKeycodeCsv(keycodes_path, layout));
@@ -235,7 +237,8 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     }
 
     auto createPreset = [&](const std::string& type,
-                            ParameterMap params) -> std::optional<std::size_t> {
+                            ParameterMap params,
+                            LayerStyle style = LayerStyle{}) -> std::optional<std::size_t> {
         auto preset = registry_.create(type);
         if (!preset) {
             std::cerr << "Warning: Unknown preset type '" << type << "'.\n";
@@ -246,7 +249,27 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         config.preset_parameters.push_back(std::move(params));
         config.preset_masks.emplace_back(key_count, true);
         config.preset_enabled.push_back(false);
+        config.preset_styles.push_back(style);
         return config.presets.size() - 1;
+    };
+
+    // opacity and blend describe how a layer composites, not what it draws, so
+    // they are pulled out of the table before the rest becomes effect parameters.
+    auto readLayerStyle = [](const toml::table& layer_tbl, const std::string& profile_id) {
+        LayerStyle style;
+        if (auto node = layer_tbl.get("opacity")) {
+            style.opacity = std::clamp(node->value_or(1.0), 0.0, 1.0);
+        }
+        if (auto node = layer_tbl.get("blend")) {
+            const std::string name = node->value_or(std::string("normal"));
+            bool ok = false;
+            style.blend = parseBlendMode(name, &ok);
+            if (!ok) {
+                std::cerr << "Warning: Profile '" << profile_id << "' uses unknown blend mode '"
+                          << name << "'; using normal.\n";
+            }
+        }
+        return style;
     };
 
     // Load Hypr/Profiles
@@ -350,7 +373,8 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
                     for (auto& [ekey, eval] : *effect_tbl) {
                         std::string key = std::string(ekey.str());
                         if (key == "type" || key == "name") continue;
-                        if (effect_is_layer && (key == "zones" || key == "keys" || key == "effect")) {
+                        if (effect_is_layer && (key == "zones" || key == "keys" || key == "effect" ||
+                                                key == "opacity" || key == "blend")) {
                             continue;
                         }
                         params[key] = tomlToString(eval);
@@ -370,7 +394,9 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
                                 continue;
                             }
 
-                            auto preset_idx_opt = createPreset(inline_effect->first, std::move(inline_effect->second));
+                            auto preset_idx_opt = createPreset(inline_effect->first,
+                                                               std::move(inline_effect->second),
+                                                               readLayerStyle(*layer_tbl, profile_id));
                             if (!preset_idx_opt) {
                                 continue;
                             }

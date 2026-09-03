@@ -44,6 +44,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(keyboard_configurator STATIC
     src/keyboard_model.cpp
     src/key_color_frame.cpp
+    src/types.cpp
     src/key_activity.cpp
     src/key_activity_watcher.cpp
     src/preset_registry.cpp

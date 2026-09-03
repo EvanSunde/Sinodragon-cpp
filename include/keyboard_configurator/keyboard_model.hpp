@@ -44,7 +44,11 @@ public:
 
     void setKeycodeMap(const std::vector<int>& keycodes);
 
-    [[nodiscard]] std::vector<std::uint8_t> encodeFrame(const KeyColorFrame& frame) const;
+    // brightness scales every channel on the way out (1.0 = as rendered). It is
+    // applied here, at the last possible moment, so effects always compose at
+    // full range and only the bytes on the wire are dimmed.
+    [[nodiscard]] std::vector<std::uint8_t> encodeFrame(const KeyColorFrame& frame,
+                                                        double brightness = 1.0) const;
 
 private:
     std::string name_;
