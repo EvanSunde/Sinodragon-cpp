@@ -61,6 +61,7 @@ add_library(keyboard_configurator STATIC
     src/effect_engine.cpp
     src/runtime.cpp
     src/app_options.cpp
+    src/control_server.cpp
     src/shutdown_signal.cpp
     src/config_loader.cpp
     src/configurator_cli.cpp
@@ -100,12 +101,19 @@ target_link_libraries(kb_configurator
         keyboard_configurator
 )
 
+add_executable(sinoctl src/sinoctl.cpp)
+
+target_link_libraries(sinoctl
+    PRIVATE
+        keyboard_configurator
+)
+
 find_package(Threads REQUIRED)
 target_link_libraries(keyboard_configurator PUBLIC Threads::Threads)
 
 # --- Install ---
 include(GNUInstallDirs)
-install(TARGETS kb_configurator RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS kb_configurator sinoctl RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES packaging/99-sinodragon.rules
         DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/udev/rules.d)
 install(FILES packaging/sinodragon.service

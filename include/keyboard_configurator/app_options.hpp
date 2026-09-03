@@ -6,7 +6,9 @@ namespace kb::cfg {
 
 struct AppOptions {
     std::string config_path;
+    std::string socket_path;
     bool daemon{false};
+    bool enable_socket{true};
     bool show_help{false};
     bool show_version{false};
     bool valid{true};

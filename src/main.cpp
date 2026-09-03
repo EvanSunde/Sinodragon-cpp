@@ -8,6 +8,7 @@
 #include "keyboard_configurator/app_options.hpp"
 #include "keyboard_configurator/config_loader.hpp"
 #include "keyboard_configurator/configurator_cli.hpp"
+#include "keyboard_configurator/control_server.hpp"
 #include "keyboard_configurator/runtime.hpp"
 #include "keyboard_configurator/shutdown_signal.hpp"
 
@@ -113,6 +114,19 @@ int main(int argc, char** argv) {
                 hypr->start();
             }
 
+            std::unique_ptr<ControlServer> control;
+            if (options.enable_socket) {
+                control = std::make_unique<ControlServer>(
+                    runtime, options.socket_path.empty() ? defaultControlSocketPath()
+                                                         : options.socket_path);
+                if (!control->start()) {
+                    // A daemon that cannot be controlled is still better than
+                    // no daemon; carry on with the lighting.
+                    std::cerr << "[Main] Continuing without a control socket.\n";
+                    control.reset();
+                }
+            }
+
             if (options.daemon) {
                 std::cout << "[Main] Running in daemon mode; send SIGTERM to stop.\n" << std::flush;
                 waitForShutdown(runtime);
@@ -121,6 +135,9 @@ int main(int argc, char** argv) {
                 cli.run();
             }
 
+            if (control) {
+                control->stop();
+            }
             if (key_watcher) {
                 key_watcher->stop();
             }

@@ -46,6 +46,15 @@ AppOptions parseArgs(int argc, char** argv) {
             options.show_help = true;
         } else if (arg == "-v" || arg == "--version") {
             options.show_version = true;
+        } else if (arg == "--no-socket") {
+            options.enable_socket = false;
+        } else if (arg == "-s" || arg == "--socket") {
+            if (i + 1 >= argc) {
+                options.valid = false;
+                options.error = arg + " needs a path";
+                return options;
+            }
+            options.socket_path = argv[++i];
         } else if (arg == "-c" || arg == "--config") {
             if (i + 1 >= argc) {
                 options.valid = false;
@@ -79,6 +88,9 @@ std::string usageText() {
            "Options:\n"
            "  -c, --config <path>   Config file to load\n"
            "  -d, --daemon          Run without the interactive prompt\n"
+           "  -s, --socket <path>   Control socket to listen on\n"
+           "                        (default: $XDG_RUNTIME_DIR/sinodragon.sock)\n"
+           "      --no-socket       Do not listen for control commands\n"
            "  -h, --help            Show this help\n"
            "  -v, --version         Show the version\n"
            "\n"
