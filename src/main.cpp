@@ -11,6 +11,7 @@
 #include "keyboard_configurator/control_server.hpp"
 #include "keyboard_configurator/runtime.hpp"
 #include "keyboard_configurator/shutdown_signal.hpp"
+#include "keyboard_configurator/single_instance.hpp"
 
 #include "keyboard_configurator/doom_fire_preset.hpp"
 #include "keyboard_configurator/key_activity_watcher.hpp"
@@ -88,6 +89,25 @@ int main(int argc, char** argv) {
     }
 
     installShutdownHandlers();
+
+    // Refuse to start a second instance before touching the device: two daemons
+    // driving one keyboard fight over every frame. The lock is held for the
+    // whole run, reload-restarts included, and released when the process exits.
+    // --preview drives no hardware, so it does not take the lock.
+    SingleInstanceLock instance_lock;
+    if (options.single_instance && !options.preview) {
+        const std::string lock_path =
+            options.lock_path.empty()
+                ? defaultLockPath(options.socket_path.empty() ? defaultControlSocketPath()
+                                                              : options.socket_path)
+                : options.lock_path;
+        if (!instance_lock.acquire(lock_path)) {
+            std::cerr << "sinodragon: " << instance_lock.error() << "\n"
+                      << "            Stop the running instance first, or pass --socket/--lock to run\n"
+                      << "            a second one for a different keyboard.\n";
+            return 3;
+        }
+    }
 
     try {
         const auto registry = buildRegistry();

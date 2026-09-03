@@ -72,6 +72,7 @@ add_library(sinodragon_core STATIC
     src/app_options.cpp
     src/control_server.cpp
     src/shutdown_signal.cpp
+    src/single_instance.cpp
     src/config_loader.cpp
     src/configurator_cli.cpp
     src/window_source.cpp
