@@ -8,11 +8,11 @@ daemon and is driven at runtime through a control socket, so lighting can be
 bound to a key, changed from a script, or wired into CI.
 
 ```bash
-kb_configurator --daemon          # run it
-sinoctl profile magma             # switch profiles
-sinoctl brightness 40             # dim it
-sinoctl game tetris start         # play something
-sinoctl state build fail          # turn the F row red from a CI script
+sinodragon --daemon        # run it
+sinoctl profile magma      # switch profiles
+sinoctl brightness 40      # dim it
+sinoctl game tetris start  # play something
+sinoctl state build fail   # turn the F row red from a CI script
 ```
 
 ---
@@ -57,8 +57,7 @@ cmake --build build -j
 sudo cmake --install build
 ```
 
-That installs `kb_configurator`, `sinoctl`, the udev rules and a systemd user
-unit.
+That installs `sinodragon`, `sinoctl`, the udev rules and a systemd user unit.
 
 ### Permissions
 
@@ -92,7 +91,7 @@ systemctl --user enable --now sinodragon
 ## Running it
 
 ```
-kb_configurator [options] [config.toml]
+sinodragon [options] [config.toml]
 
   -c, --config <path>   Config file to load
   -d, --daemon          Run without the interactive prompt

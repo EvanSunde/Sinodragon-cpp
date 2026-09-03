@@ -51,7 +51,7 @@ int connectTo(const std::string& path) {
 
     if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
         std::cerr << "sinoctl: cannot reach the daemon at " << path << ": " << std::strerror(errno)
-                  << "\nIs it running? Try: kb_configurator --daemon\n";
+                  << "\nIs it running? Try: sinodragon --daemon\n";
         ::close(fd);
         return -1;
     }

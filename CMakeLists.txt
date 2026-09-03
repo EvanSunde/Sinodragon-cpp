@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(keyboard_configurator LANGUAGES CXX)
+project(sinodragon LANGUAGES CXX)
 
 # --- Dependencies ---
 find_package(PkgConfig QUIET)
@@ -41,7 +41,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # --- Main Library ---
-add_library(keyboard_configurator STATIC
+add_library(sinodragon_core STATIC
     src/keyboard_model.cpp
     src/key_color_frame.cpp
     src/types.cpp
@@ -85,12 +85,12 @@ add_library(keyboard_configurator STATIC
     src/hidapi_transport.cpp
 )
 
-target_include_directories(keyboard_configurator
+target_include_directories(sinodragon_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(keyboard_configurator
+target_link_libraries(sinodragon_core
     PUBLIC
         ${HIDAPI_TARGET}
         $<IF:$<TARGET_EXISTS:PkgConfig::LIBEVDEV>,PkgConfig::LIBEVDEV,>
@@ -102,36 +102,36 @@ target_link_libraries(keyboard_configurator
 if(NOT TARGET PkgConfig::LIBEVDEV)
     find_library(LIBEVDEV_LIB NAMES libevdev)
     if(LIBEVDEV_LIB)
-        target_link_libraries(keyboard_configurator PUBLIC ${LIBEVDEV_LIB})
+        target_link_libraries(sinodragon_core PUBLIC ${LIBEVDEV_LIB})
     else()
         message(FATAL_ERROR "libevdev not found.")
     endif()
 endif()
 
-add_executable(kb_configurator src/main.cpp)
+add_executable(sinodragon src/main.cpp)
 
-target_link_libraries(kb_configurator
+target_link_libraries(sinodragon
     PRIVATE
-        keyboard_configurator
+        sinodragon_core
 )
 
 add_executable(sinoctl src/sinoctl.cpp)
 
 target_link_libraries(sinoctl
     PRIVATE
-        keyboard_configurator
+        sinodragon_core
 )
 
 find_package(Threads REQUIRED)
-target_link_libraries(keyboard_configurator PUBLIC Threads::Threads)
+target_link_libraries(sinodragon_core PUBLIC Threads::Threads)
 
 # Optional X11 window source. Wayland-only setups do not need it; without it
 # the x11 backend compiles to a stub that reports itself unavailable.
 find_package(X11 QUIET)
 if(X11_FOUND)
-    target_compile_definitions(keyboard_configurator PRIVATE SINODRAGON_HAVE_X11)
-    target_link_libraries(keyboard_configurator PUBLIC ${X11_LIBRARIES})
-    target_include_directories(keyboard_configurator PRIVATE ${X11_INCLUDE_DIR})
+    target_compile_definitions(sinodragon_core PRIVATE SINODRAGON_HAVE_X11)
+    target_link_libraries(sinodragon_core PUBLIC ${X11_LIBRARIES})
+    target_include_directories(sinodragon_core PRIVATE ${X11_INCLUDE_DIR})
     message(STATUS "X11 window source: enabled")
 else()
     message(STATUS "X11 window source: disabled (libX11 not found)")
@@ -139,7 +139,7 @@ endif()
 
 # --- Install ---
 include(GNUInstallDirs)
-install(TARGETS kb_configurator sinoctl RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS sinodragon sinoctl RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES packaging/99-sinodragon.rules
         DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/udev/rules.d)
 install(FILES packaging/sinodragon.service

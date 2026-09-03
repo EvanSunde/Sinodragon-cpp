@@ -88,7 +88,7 @@ AppOptions parseArgs(int argc, char** argv) {
 }
 
 std::string usageText() {
-    return "Usage: kb_configurator [options] [config.toml]\n"
+    return "Usage: sinodragon [options] [config.toml]\n"
            "\n"
            "Options:\n"
            "  -c, --config <path>   Config file to load\n"
