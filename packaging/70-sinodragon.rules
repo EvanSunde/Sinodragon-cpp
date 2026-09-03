@@ -1,0 +1,34 @@
+# udev rules for the Sinodragon keyboard RGB daemon.
+#
+# Install (the file name matters -- see the note below):
+#   sudo cp packaging/70-sinodragon.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+# Then replug the keyboard, or log out and back in, if it still needs sudo.
+#
+# Without these the daemon must run as root: the hidraw LED node and the
+# keyboard's /dev/input/event* node are both root-only by default.
+#
+# WHY 70- AND NOT 99-: TAG+="uaccess" only grants access if it runs BEFORE
+# systemd's own uaccess rules (70-uaccess.rules, 73-seat-late.rules), which are
+# what actually turn the tag into an ACL for the logged-in user. A 99- file
+# runs too late, the tag is ignored, and the device stays root-only -- which
+# looks exactly like "it still needs sudo". "70-sinodragon" sorts before
+# "70-uaccess", so the tag lands in time.
+
+# 1. The LED interface. Redragon keyboards report vendor 0x258a.
+#    Change the id for your board if it differs; `lsusb` shows it.
+KERNEL=="hidraw*", ATTRS{idVendor}=="258a", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="258a", MODE="0660", TAG+="uaccess"
+
+# 2. The keyboard's input event node -- needed for reactive effects, the
+#    shortcut overlay and the games. uaccess grants it to the user at the
+#    local seat, which is safer than joining the 'input' group (that would let
+#    every process you run read all your keystrokes).
+KERNEL=="event*", ATTRS{idVendor}=="258a", TAG+="uaccess"
+
+# If you type on a DIFFERENT keyboard than the one being lit -- e.g. a laptop's
+# built-in keyboard while an external Redragon glows -- the reactive effects
+# follow the keyboard you actually type on, so grant that one access too. This
+# line matches every keyboard on the system; uncomment it if the effects do not
+# react to your typing:
+# KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TAG+="uaccess"

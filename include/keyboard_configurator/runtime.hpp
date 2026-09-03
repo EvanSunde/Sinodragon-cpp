@@ -95,6 +95,17 @@ public:
     void applyPresetParameter(std::size_t index, const std::string& key, const std::string& value);
     void refreshRender();
 
+    // --- Shortcut overlay (a modifier is held) ---
+    // The overlay is a transient layer on top of whatever profile is showing.
+    // It uses the same saved-base mechanism as a running game: engaging saves
+    // the current profile, and while it is up every base-profile change made by
+    // the window watchers is stored rather than shown -- so disengaging always
+    // reveals the profile of the *current* window, no matter the event order.
+    // overlayEngage returns false (and shows nothing) while a game is running.
+    bool overlayEngage(std::size_t preset_index);
+    void overlayUpdateMask(std::size_t preset_index, const std::vector<bool>& mask);
+    void overlayDisengage();
+
     void startConfigWatch();
     void stopConfigWatch();
 
@@ -127,6 +138,16 @@ private:
     // composition it interrupted.
     void applyGameOverrideLocked(std::size_t game_index);
     void clearGameOverrideLocked();
+
+    // Locked halves of the overlay API, so callers already holding the engine
+    // mutex (e.g. cmdGame) can reuse them without re-locking.
+    void overlayDisengageLocked();
+
+    // True while a game or the shortcut overlay owns the display, i.e. while
+    // base-profile changes must be stored for later rather than shown now.
+    [[nodiscard]] bool baseOverriddenLocked() const {
+        return game_override_active_ || overlay_active_;
+    }
 
     // Reports whether a freshly loaded config still describes the device we
     // already have open.
@@ -173,7 +194,10 @@ private:
     std::vector<std::size_t> current_draw_list_;
     std::vector<std::vector<bool>> current_masks_;
 
+    // A game and the shortcut overlay are mutually exclusive owners of the
+    // display; both save the interrupted profile into the same slot below.
     bool game_override_active_{false};
+    bool overlay_active_{false};
     std::string active_game_;
     std::vector<std::size_t> saved_draw_list_;
     std::vector<std::vector<bool>> saved_masks_;

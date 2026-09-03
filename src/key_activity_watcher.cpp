@@ -5,6 +5,7 @@
 #include <libevdev/libevdev.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <cerrno>
 
 #include <chrono>
 #include <iostream>
@@ -39,23 +40,41 @@ void KeyActivityWatcher::openDevices() {
     const std::filesystem::path by_path("/dev/input/by-path");
     std::error_code ec;
     if (!std::filesystem::exists(by_path, ec)) {
+        std::cerr << "[KeyActivity] /dev/input/by-path is missing; reactive effects and games "
+                     "cannot read keystrokes.\n";
         return;
     }
+
+    std::size_t found = 0;
+    std::size_t permission_denied = 0;
     for (auto& entry : std::filesystem::directory_iterator(by_path, ec)) {
         if (ec) break;
         if (!entry.is_symlink(ec) && !entry.is_regular_file(ec)) continue;
         const auto name = entry.path().filename().string();
         if (name.find("-kbd") == std::string::npos) continue;
+        ++found;
         std::filesystem::path real = std::filesystem::read_symlink(entry.path(), ec);
         std::filesystem::path node = real.empty() ? entry.path() : (entry.path().parent_path() / real);
         int fd = ::open(node.c_str(), O_RDONLY | O_NONBLOCK);
-        if (fd < 0) continue;
+        if (fd < 0) {
+            if (errno == EACCES || errno == EPERM) ++permission_denied;
+            continue;
+        }
         libevdev* dev = nullptr;
         if (libevdev_new_from_fd(fd, &dev) != 0) {
             ::close(fd);
             continue;
         }
         devices_.push_back({fd, dev});
+    }
+
+    // A silent failure here looks like "reactive effects just don't work", so
+    // say plainly when we could see keyboards but were not allowed to read them.
+    if (devices_.empty() && found > 0 && permission_denied > 0) {
+        std::cerr << "[KeyActivity] Found " << found
+                  << " keyboard(s) but permission was denied on all of them.\n"
+                     "             Install packaging/70-sinodragon.rules (see the README) so the "
+                     "daemon can read input without sudo.\n";
     }
 }
 

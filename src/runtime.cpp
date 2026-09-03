@@ -211,8 +211,9 @@ bool Runtime::applyProfileLocked(const std::string& profile) {
 
     active_profile_ = profile;
 
-    if (game_override_active_) {
-        // A game owns the display; remember what to go back to instead.
+    if (baseOverriddenLocked()) {
+        // A game or the shortcut overlay owns the display; remember what to go
+        // back to instead of showing it now.
         saved_draw_list_ = order->second;
         saved_masks_ = resized;
         saved_state_valid_ = true;
@@ -310,7 +311,7 @@ void Runtime::activateProfile(const std::string& profile) {
 void Runtime::setDrawList(const std::vector<std::size_t>& list) {
     {
         std::lock_guard<std::mutex> guard(engine_mutex_);
-        if (game_override_active_) {
+        if (baseOverriddenLocked()) {
             saved_draw_list_ = list;
             saved_state_valid_ = true;
         } else {
@@ -324,7 +325,7 @@ void Runtime::setDrawList(const std::vector<std::size_t>& list) {
 void Runtime::applyPresetMasks(const std::vector<std::vector<bool>>& masks) {
     {
         std::lock_guard<std::mutex> guard(engine_mutex_);
-        if (game_override_active_) {
+        if (baseOverriddenLocked()) {
             saved_masks_ = masks;
             saved_state_valid_ = true;
         } else {
@@ -341,7 +342,7 @@ void Runtime::applyPresetMask(std::size_t index, const std::vector<bool>& mask) 
         if (index >= engine_.presetCount()) {
             return;
         }
-        if (game_override_active_) {
+        if (baseOverriddenLocked()) {
             saved_masks_.resize(engine_.presetCount(), std::vector<bool>(model_.keyCount(), true));
             saved_masks_[index] = mask;
             saved_state_valid_ = true;
@@ -432,6 +433,7 @@ std::string Runtime::reload() {
         // Preset indices are rebuilt from scratch, so any override or cached
         // composition pointing at the old ones has to go.
         game_override_active_ = false;
+        overlay_active_ = false;
         active_game_.clear();
         saved_state_valid_ = false;
         saved_draw_list_.clear();
@@ -804,6 +806,9 @@ std::string Runtime::cmdGame(const std::string& args) {
                     engine_.setPresetEnabled(i, false);
                 }
             }
+            // If a modifier is being held, reveal the base first so the game
+            // saves the real profile, not the overlay, as what to restore.
+            overlayDisengageLocked();
             target->startGame(model_);
             engine_.setPresetEnabled(target_index, true);
             applyGameOverrideLocked(target_index);
@@ -853,6 +858,71 @@ void Runtime::clearGameOverrideLocked() {
     saved_state_valid_ = false;
     saved_draw_list_.clear();
     saved_masks_.clear();
+}
+
+// --- Shortcut overlay -------------------------------------------------------
+
+bool Runtime::overlayEngage(std::size_t preset_index) {
+    {
+        std::lock_guard<std::mutex> guard(engine_mutex_);
+        if (preset_index >= engine_.presetCount() || game_override_active_) {
+            return false;  // no overlay over a running game
+        }
+        if (!overlay_active_) {
+            // Save the profile currently showing; it is what disengage reveals,
+            // kept current by the window watchers writing to the saved slot.
+            saved_draw_list_ = current_draw_list_;
+            saved_masks_ = current_masks_;
+            saved_state_valid_ = true;
+            overlay_active_ = true;
+        }
+        const std::vector<std::size_t> only = {preset_index};
+        engine_.setDrawList(only);
+        current_draw_list_ = only;
+    }
+    wake();
+    return true;
+}
+
+void Runtime::overlayUpdateMask(std::size_t preset_index, const std::vector<bool>& mask) {
+    {
+        std::lock_guard<std::mutex> guard(engine_mutex_);
+        if (!overlay_active_ || preset_index >= engine_.presetCount()) {
+            return;
+        }
+        // The overlay's own mask is shown live; only base-profile changes are
+        // routed to the saved slot.
+        engine_.setPresetMask(preset_index, mask);
+    }
+    wake();
+}
+
+void Runtime::overlayDisengageLocked() {
+    if (!overlay_active_) {
+        return;
+    }
+    overlay_active_ = false;
+
+    if (saved_state_valid_) {
+        if (saved_masks_.size() == engine_.presetCount()) {
+            engine_.setPresetMasks(saved_masks_, true);
+            current_masks_ = saved_masks_;
+        }
+        engine_.setDrawList(saved_draw_list_);
+        current_draw_list_ = saved_draw_list_;
+    }
+
+    saved_state_valid_ = false;
+    saved_draw_list_.clear();
+    saved_masks_.clear();
+}
+
+void Runtime::overlayDisengage() {
+    {
+        std::lock_guard<std::mutex> guard(engine_mutex_);
+        overlayDisengageLocked();
+    }
+    wake();
 }
 
 // --- Config watching -------------------------------------------------------

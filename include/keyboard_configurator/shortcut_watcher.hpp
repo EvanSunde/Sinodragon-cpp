@@ -84,10 +84,6 @@ private:
     void compileShortcuts();
     void updateActiveShortcutFromClass();
     void applyMaskForMods(int modmask);
-    
-    // NEW: Restores the background profile based on the active window
-    // (Used when releasing Ctrl to switch back to the correct "Painter's List")
-    void restoreActiveProfile();
 };
 
 } // namespace kb::cfg

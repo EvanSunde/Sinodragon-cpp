@@ -66,7 +66,7 @@ effects, the shortcut overlay and the games — to read `/dev/input/event*`.
 Both are root-only by default:
 
 ```bash
-sudo cp packaging/99-sinodragon.rules /etc/udev/rules.d/
+sudo cp packaging/70-sinodragon.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 

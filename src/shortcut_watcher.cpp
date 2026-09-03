@@ -103,25 +103,39 @@ void ShortcutWatcher::openDevices() {
     const std::filesystem::path by_path("/dev/input/by-path");
     std::error_code ec;
     if (!std::filesystem::exists(by_path, ec)) return;
-    
+
+    std::size_t found = 0;
+    std::size_t permission_denied = 0;
     for (auto& entry : std::filesystem::directory_iterator(by_path, ec)) {
         if (ec) break;
         if (!entry.is_symlink(ec) && !entry.is_regular_file(ec)) continue;
         const auto name = entry.path().filename().string();
         if (name.find("-kbd") == std::string::npos) continue;
-        
+        ++found;
+
         std::filesystem::path real = std::filesystem::read_symlink(entry.path(), ec);
         std::filesystem::path node = real.empty() ? entry.path() : (entry.path().parent_path() / real);
-        
+
         int fd = ::open(node.c_str(), O_RDONLY | O_NONBLOCK);
-        if (fd < 0) continue;
-        
+        if (fd < 0) {
+            if (errno == EACCES || errno == EPERM) ++permission_denied;
+            continue;
+        }
+
         libevdev* dev = nullptr;
         if (libevdev_new_from_fd(fd, &dev) != 0) {
             ::close(fd);
             continue;
         }
         devices_.push_back({fd, dev});
+    }
+
+    if (devices_.empty() && found > 0 && permission_denied > 0) {
+        std::cerr << "[Shortcut] Found " << found
+                  << " keyboard(s) but permission was denied on all of them; the shortcut overlay "
+                     "will not respond.\n"
+                     "          Install packaging/70-sinodragon.rules (see the README) to run "
+                     "without sudo.\n";
     }
 }
 
@@ -196,13 +210,6 @@ void ShortcutWatcher::updateActiveShortcutFromClass() {
     }
 }
 
-// Recomputes the profile that should be showing for the focused window,
-// rather than restoring a snapshot that may since have gone stale.
-void ShortcutWatcher::restoreActiveProfile() {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    runtime_.activateProfileForWindow(active_class_, active_title_);
-}
-
 void ShortcutWatcher::applyMaskForMods(int modmask) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!overlay_valid_) return;
@@ -210,7 +217,7 @@ void ShortcutWatcher::applyMaskForMods(int modmask) {
     // Calculate mask based on active shortcut profile + mods
     std::vector<bool> mask(key_count_, false);
     std::string used_profile;
-    
+
     auto build_from = [&](const std::string& pname) -> bool {
         if (pname.empty()) return false;
         auto it = compiled_.find(pname);
@@ -223,7 +230,7 @@ void ShortcutWatcher::applyMaskForMods(int modmask) {
         used_profile = pname;
         return true;
     };
-    
+
     bool found = build_from(active_shortcut_name_);
     if (!found && hypr_.default_shortcut != active_shortcut_name_) {
         found = build_from(hypr_.default_shortcut);
@@ -232,35 +239,34 @@ void ShortcutWatcher::applyMaskForMods(int modmask) {
     const bool has_any = std::any_of(mask.begin(), mask.end(), [](bool b){ return b; });
 
     if (modmask != 0 && has_any) {
-        // === ENGAGE SHORTCUTS ===
+        // === ENGAGE ===
+        // overlayEngage saves the current profile and, while engaged, the
+        // runtime stores every window-driven profile change so disengaging
+        // reveals the profile of whatever window is focused *then*. It refuses
+        // (returns false) while a game owns the display.
         if (!engaged_) {
-            // Force DrawList to ONLY be the overlay preset
-            std::vector<std::size_t> overlay_only = { overlay_index_ };
-            runtime_.setDrawList(overlay_only);
+            if (!runtime_.overlayEngage(overlay_index_)) {
+                return;
+            }
             engaged_ = true;
         }
 
-        // Update Color if needed
         if (!used_profile.empty()) {
             auto sit = hypr_.shortcuts.find(used_profile);
             if (sit != hypr_.shortcuts.end() && !sit->second.color.empty()) {
                 runtime_.applyPresetParameter(overlay_index_, "color", sit->second.color);
             }
         }
-        
-        // Update Mask (Show specific keys)
-        runtime_.applyPresetMask(overlay_index_, mask);
-        runtime_.refreshRender();
-        
+
+        // Show the keys bound under the held modifiers.
+        runtime_.overlayUpdateMask(overlay_index_, mask);
+
     } else {
-        // === DISENGAGE (RESTORE) ===
+        // === DISENGAGE ===
+        // The runtime reveals the current window's profile; nothing to compute
+        // here.
         if (engaged_) {
-            // Instead of restoring a saved list, we recalculate the correct list
-            // for the current active window.
-            restoreActiveProfile();
-            
-            // Clean up overlay state
-            runtime_.applyPresetMask(overlay_index_, std::vector<bool>(key_count_, false));
+            runtime_.overlayDisengage();
             engaged_ = false;
         }
     }
