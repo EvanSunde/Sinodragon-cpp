@@ -9,6 +9,7 @@
 #include "keyboard_configurator/preset.hpp"
 #include "keyboard_configurator/key_activity.hpp"
 #include "keyboard_configurator/key_color_frame.hpp"
+#include "keyboard_configurator/types.hpp"
 
 namespace kb::cfg {
 
@@ -27,12 +28,19 @@ public:
     [[nodiscard]] std::size_t presetCount() const { return presets_.size(); }
 
     void setKeyActivityProvider(KeyActivityProviderPtr provider);
+    void setSystemState(SystemStatePtr state);
 
     // Legacy methods
     void setPresetEnabled(std::size_t index, bool enabled);
     bool presetEnabled(std::size_t index) const;
     void setPresetMask(std::size_t index, const std::vector<bool>& mask);
     void setPresetMasks(const std::vector<std::vector<bool>>& masks, bool overlay_replace = false);
+
+    // Per-layer opacity and blend mode. A layer with the default style
+    // overwrites the keys its mask covers, which is the historical behaviour.
+    void setLayerStyles(std::vector<LayerStyle> styles);
+    void setLayerStyle(std::size_t index, const LayerStyle& style);
+    [[nodiscard]] LayerStyle layerStyle(std::size_t index) const;
 
     LightingPreset& presetAt(std::size_t index);
     const LightingPreset& presetAt(std::size_t index) const;
@@ -41,8 +49,13 @@ public:
     void renderFrame(double time_seconds);
     bool pushFrame();
 
+    // Exposed so a caller can encode the frame under its own lock and then do
+    // the device write without holding it.
+    [[nodiscard]] const KeyColorFrame& frame() const noexcept { return frame_; }
+
 private:
     void applyKeyActivityProvider();
+    void applySystemState();
 
     const KeyboardModel& model_;
     DeviceTransport& transport_;
@@ -59,7 +72,13 @@ private:
     std::vector<std::size_t> active_draw_list_; // New List
     
     std::vector<std::vector<bool>> preset_masks_;
+    std::vector<LayerStyle> preset_styles_;
     KeyActivityProviderPtr key_activity_provider_;
+    SystemStatePtr system_state_;
+
+    // Scratch buffer for the layer currently being composited. Kept as a
+    // member so a frame costs no allocations.
+    KeyColorFrame layer_frame_;
 };
 
 }  // namespace kb::cfg

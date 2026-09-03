@@ -1,6 +1,6 @@
 #pragma once
 
-#include "keyboard_configurator/preset.hpp"
+#include "keyboard_configurator/game_preset.hpp"
 #include <deque>
 #include <optional>
 #include <random>
@@ -8,7 +8,7 @@
 
 namespace kb::cfg {
 
-class SnakePreset : public LightingPreset {
+class SnakePreset : public GamePreset {
 public:
     std::string id() const override;
     void configure(const ParameterMap& params) override;
@@ -20,6 +20,12 @@ public:
     void start(const KeyboardModel& model);
     void stop();
     bool isRunning() const { return is_running_; }
+
+    // GamePreset
+    std::string gameName() const override { return "snake"; }
+    void startGame(const KeyboardModel& model) override { start(model); }
+    void stopGame() override { stop(); }
+    bool isGameRunning() const override { return is_running_; }
 
 private:
     struct Position {

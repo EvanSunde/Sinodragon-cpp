@@ -6,7 +6,8 @@
 namespace kb::cfg {
 
 EffectEngine::EffectEngine(const KeyboardModel& model, DeviceTransport& transport)
-    : model_(model), transport_(transport), frame_(model.keyCount()) {}
+    : model_(model), transport_(transport), frame_(model.keyCount()),
+      layer_frame_(model.keyCount()) {}
 
 void EffectEngine::setPresets(std::vector<std::unique_ptr<LightingPreset>> presets) {
     presets_ = std::move(presets);
@@ -39,7 +40,11 @@ void EffectEngine::setPresets(std::vector<std::unique_ptr<LightingPreset>> prese
         mask.assign(model_.keyCount(), true);
     }
 
+    preset_styles_.assign(presets_.size(), LayerStyle{});
+    layer_frame_.resize(model_.keyCount());
+
     applyKeyActivityProvider();
+    applySystemState();
 }
 
 void EffectEngine::setPresets(std::vector<std::unique_ptr<LightingPreset>> presets,
@@ -65,35 +70,52 @@ void EffectEngine::setKeyActivityProvider(KeyActivityProviderPtr provider) {
     applyKeyActivityProvider();
 }
 
+void EffectEngine::setSystemState(SystemStatePtr state) {
+    system_state_ = std::move(state);
+    applySystemState();
+}
+
 void EffectEngine::renderFrame(double time_seconds) {
     if (frame_.size() != model_.keyCount()) {
         frame_.resize(model_.keyCount());
     }
 
     frame_.fill({0, 0, 0});
-    
-    KeyColorFrame temp(model_.keyCount());
+
     const auto kc = model_.keyCount();
+    if (layer_frame_.size() != kc) {
+        layer_frame_.resize(kc);
+    }
+
+    static const std::vector<bool> kNoMask;
 
     auto renderLayer = [&](std::size_t idx) {
         if (idx >= presets_.size()) return;
 
-        temp.resize(kc);
-        temp.fill({0, 0, 0});
-        presets_[idx]->render(model_, time_seconds, temp);
+        layer_frame_.fill({0, 0, 0});
+        presets_[idx]->render(model_, time_seconds, layer_frame_);
 
-        const auto& mask = (idx < preset_masks_.size()) ? preset_masks_[idx] : std::vector<bool>();
-        
-        if (!mask.empty()) {
-            for (std::size_t k = 0; k < kc; ++k) {
-                if (mask[k]) {
-                    frame_.setColor(k, temp.color(k));
-                }
+        const auto& mask = (idx < preset_masks_.size()) ? preset_masks_[idx] : kNoMask;
+        const LayerStyle style = (idx < preset_styles_.size()) ? preset_styles_[idx] : LayerStyle{};
+
+        // A fully opaque Normal layer is the common case and is just a copy.
+        const bool simple = style.blend == BlendMode::Normal && style.opacity >= 1.0;
+
+        for (std::size_t k = 0; k < kc; ++k) {
+            if (!mask.empty() && !mask[k]) {
+                continue;
             }
-        } else {
-            for (std::size_t k = 0; k < kc; ++k) {
-                frame_.setColor(k, temp.color(k));
+            const RgbColor above = layer_frame_.color(k);
+            if (simple) {
+                frame_.setColor(k, above);
+                continue;
             }
+            const RgbColor below = frame_.color(k);
+            RgbColor blended = blendColors(below, above, style.blend);
+            if (style.opacity < 1.0) {
+                blended = mixColors(below, blended, style.opacity);
+            }
+            frame_.setColor(k, blended);
         }
     };
 
@@ -190,6 +212,34 @@ void EffectEngine::setPresetMasks(const std::vector<std::vector<bool>>& masks, b
     for (std::size_t i = 0; i < pc; ++i) {
         if (masks[i].size() == kc) {
             preset_masks_[i] = masks[i];
+        }
+    }
+}
+
+void EffectEngine::setLayerStyles(std::vector<LayerStyle> styles) {
+    styles.resize(presets_.size(), LayerStyle{});
+    preset_styles_ = std::move(styles);
+}
+
+void EffectEngine::setLayerStyle(std::size_t index, const LayerStyle& style) {
+    if (index >= presets_.size()) {
+        throw std::out_of_range("EffectEngine::setLayerStyle index out of range");
+    }
+    preset_styles_.resize(presets_.size(), LayerStyle{});
+    preset_styles_[index] = style;
+}
+
+LayerStyle EffectEngine::layerStyle(std::size_t index) const {
+    if (index < preset_styles_.size()) {
+        return preset_styles_[index];
+    }
+    return LayerStyle{};
+}
+
+void EffectEngine::applySystemState() {
+    for (auto& preset : presets_) {
+        if (preset) {
+            preset->setSystemState(system_state_);
         }
     }
 }

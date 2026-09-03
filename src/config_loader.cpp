@@ -22,6 +22,7 @@
 
 #include "keyboard_configurator/hidapi_transport.hpp"
 #include "keyboard_configurator/logging_transport.hpp"
+#include "keyboard_configurator/preview_transport.hpp"
 
 namespace kb::cfg {
 
@@ -153,7 +154,9 @@ std::vector<int> readKeycodeCsv(const std::filesystem::path& path,
 std::unique_ptr<DeviceTransport> createTransport(const std::string& id) {
     if (id == "logging") return std::make_unique<LoggingTransport>();
     if (id == "hidapi") return std::make_unique<HidapiTransport>();
-    throw std::runtime_error("Unsupported transport: " + id);
+    if (id == "preview") return std::make_unique<PreviewTransport>();
+    throw std::runtime_error("Unsupported transport '" + id +
+                             "' (expected hidapi, preview or logging)");
 }
 
 // --- Helper: Parse Modifiers ---
@@ -201,7 +204,12 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
 
     size_t pkt_len = device["packet_length"].value_or(0);
     uint32_t fps = device["frame_interval_ms"].value_or(33);
-    std::string transport = device["transport"].value_or("hidapi");
+    int brightness = device["brightness"].value_or(100);
+    bool config_watch_mode = device["config_watch_mode"].value_or(false);
+    auto preview_transpose = device["preview_transpose"].value<bool>();
+    std::string transport = forced_transport_.empty()
+                                ? device["transport"].value_or(std::string{"hidapi"})
+                                : forced_transport_;
     
     std::filesystem::path layout_path = root_dir / device["layout"].value_or("");
     std::filesystem::path keycodes_path = root_dir / device["keycodes"].value_or("");
@@ -217,6 +225,13 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         std::nullopt, std::nullopt,
         {}, {}
     };
+    config.brightness = std::clamp(brightness, 0, 100);
+    config.config_watch_mode = config_watch_mode;
+    if (preview_transpose) {
+        if (auto* preview = dynamic_cast<PreviewTransport*>(config.transport.get())) {
+            preview->setTranspose(*preview_transpose);
+        }
+    }
 
     if (std::filesystem::exists(keycodes_path)) {
          config.model.setKeycodeMap(readKeycodeCsv(keycodes_path, layout));
@@ -235,7 +250,8 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     }
 
     auto createPreset = [&](const std::string& type,
-                            ParameterMap params) -> std::optional<std::size_t> {
+                            ParameterMap params,
+                            LayerStyle style = LayerStyle{}) -> std::optional<std::size_t> {
         auto preset = registry_.create(type);
         if (!preset) {
             std::cerr << "Warning: Unknown preset type '" << type << "'.\n";
@@ -246,13 +262,35 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         config.preset_parameters.push_back(std::move(params));
         config.preset_masks.emplace_back(key_count, true);
         config.preset_enabled.push_back(false);
+        config.preset_styles.push_back(style);
         return config.presets.size() - 1;
+    };
+
+    // opacity and blend describe how a layer composites, not what it draws, so
+    // they are pulled out of the table before the rest becomes effect parameters.
+    auto readLayerStyle = [](const toml::table& layer_tbl, const std::string& profile_id) {
+        LayerStyle style;
+        if (auto node = layer_tbl.get("opacity")) {
+            style.opacity = std::clamp(node->value_or(1.0), 0.0, 1.0);
+        }
+        if (auto node = layer_tbl.get("blend")) {
+            const std::string name = node->value_or(std::string("normal"));
+            bool ok = false;
+            style.blend = parseBlendMode(name, &ok);
+            if (!ok) {
+                std::cerr << "Warning: Profile '" << profile_id << "' uses unknown blend mode '"
+                          << name << "'; using normal.\n";
+            }
+        }
+        return style;
     };
 
     // Load Hypr/Profiles
     if (auto hypr_node = tbl["hypr"]) {
         HyprConfig hcfg;
         hcfg.enabled = hypr_node["enabled"].value_or(false);
+        hcfg.events_socket = hypr_node["events_socket"].value_or(std::string{});
+        hcfg.window_source = hypr_node["window_source"].value_or(std::string{"auto"});
         
         auto growProfileMasks = [&](std::size_t idx) {
             for (auto& [_, masks] : hcfg.profile_masks) {
@@ -282,6 +320,26 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         if (auto apps = tbl["apps"].as_table()) {
             hcfg.default_profile = (*apps)["default_profile"].value_or("default");
             hcfg.default_shortcut = (*apps)["default_shortcut"].value_or("default");
+            // [[apps.title_rules]] -- an ordered list, because "first match
+            // wins" needs an order and a TOML table has none.
+            if (auto rules = (*apps)["title_rules"].as_array()) {
+                for (auto& rule_node : *rules) {
+                    const toml::table* rule = rule_node.as_table();
+                    if (rule == nullptr) continue;
+                    TitleRule parsed;
+                    parsed.contains = (*rule)["contains"].value_or(std::string{});
+                    parsed.window_class = (*rule)["class"].value_or(std::string{});
+                    parsed.profile = (*rule)["profile"].value_or(std::string{});
+                    parsed.shortcut = (*rule)["shortcut"].value_or(std::string{});
+                    if (parsed.contains.empty() || (parsed.profile.empty() && parsed.shortcut.empty())) {
+                        std::cerr << "Warning: [[apps.title_rules]] entry needs 'contains' and a "
+                                     "'profile' or 'shortcut'; skipping.\n";
+                        continue;
+                    }
+                    hcfg.title_rules.push_back(std::move(parsed));
+                }
+            }
+
             if (auto maps = (*apps)["mappings"].as_table()) {
                  for (auto& [cls, prof] : *maps) {
                      // Check if it's a simple string or a table
@@ -350,7 +408,8 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
                     for (auto& [ekey, eval] : *effect_tbl) {
                         std::string key = std::string(ekey.str());
                         if (key == "type" || key == "name") continue;
-                        if (effect_is_layer && (key == "zones" || key == "keys" || key == "effect")) {
+                        if (effect_is_layer && (key == "zones" || key == "keys" || key == "effect" ||
+                                                key == "opacity" || key == "blend")) {
                             continue;
                         }
                         params[key] = tomlToString(eval);
@@ -370,7 +429,9 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
                                 continue;
                             }
 
-                            auto preset_idx_opt = createPreset(inline_effect->first, std::move(inline_effect->second));
+                            auto preset_idx_opt = createPreset(inline_effect->first,
+                                                               std::move(inline_effect->second),
+                                                               readLayerStyle(*layer_tbl, profile_id));
                             if (!preset_idx_opt) {
                                 continue;
                             }

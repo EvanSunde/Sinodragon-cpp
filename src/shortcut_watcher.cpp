@@ -11,7 +11,7 @@
 
 #include <libevdev/libevdev.h>
 
-#include "keyboard_configurator/configurator_cli.hpp"
+#include "keyboard_configurator/runtime.hpp"
 #include "keyboard_configurator/keyboard_model.hpp"
 
 namespace kb::cfg {
@@ -24,31 +24,44 @@ static inline bool is_super(int code) { return code == KEY_LEFTMETA || code == K
 }
 
 ShortcutWatcher::ShortcutWatcher(const KeyboardModel& model,
-                                 ConfiguratorCLI& cli,
+                                 Runtime& runtime,
                                  const HyprConfig& hypr,
                                  std::size_t key_count)
-    : model_(model), cli_(cli), hypr_(hypr), key_count_(key_count) {
-    
-    if (hypr_.shortcuts_overlay_preset_index >= 0) {
-        overlay_index_ = static_cast<std::size_t>(hypr_.shortcuts_overlay_preset_index);
-        overlay_valid_ = true;
-    }
+    : model_(model), runtime_(runtime), hypr_(hypr), key_count_(key_count) {
+    compileShortcuts();
+}
 
-    for (const auto& kv : hypr_.shortcuts) {
-        CompiledProfile cp;
-        for (const auto& ck : kv.second.combos) {
-            int modmask = ck.first;
+// Resolving every key label to an index up front keeps the hot path -- a
+// modifier press -- a single hash lookup.
+void ShortcutWatcher::compileShortcuts() {
+    overlay_valid_ = hypr_.shortcuts_overlay_preset_index >= 0;
+    overlay_index_ = overlay_valid_ ? static_cast<std::size_t>(hypr_.shortcuts_overlay_preset_index) : 0;
+
+    compiled_.clear();
+    for (const auto& [name, profile] : hypr_.shortcuts) {
+        CompiledProfile compiled;
+        for (const auto& [modmask, labels] : profile.combos) {
             std::vector<std::size_t> indices;
-            indices.reserve(ck.second.size());
-            for (const auto& label : ck.second) {
+            indices.reserve(labels.size());
+            for (const auto& label : labels) {
                 if (auto idx = model_.indexForKey(label)) {
                     indices.push_back(*idx);
                 }
             }
-            cp.combos.emplace(modmask, std::move(indices));
+            compiled.combos.emplace(modmask, std::move(indices));
         }
-        compiled_.emplace(kv.first, std::move(cp));
+        compiled_.emplace(name, std::move(compiled));
     }
+}
+
+void ShortcutWatcher::reconfigure(const HyprConfig& hypr) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    hypr_ = hypr;
+    compileShortcuts();
+    updateActiveShortcutFromClass();
+    // engaged_ refers to preset indices that no longer exist after a reload.
+    engaged_ = false;
+    applyMaskForMods(mods_.load());
 }
 
 ShortcutWatcher::~ShortcutWatcher() { stop(); }
@@ -69,9 +82,10 @@ void ShortcutWatcher::stop() {
     closeDevices();
 }
 
-bool ShortcutWatcher::setActiveClass(const std::string& klass) {
+bool ShortcutWatcher::setActiveWindow(const std::string& window_class, const std::string& title) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    active_class_ = klass;
+    active_class_ = window_class;
+    active_title_ = title;
     updateActiveShortcutFromClass();
     
     // If we are NOT currently showing shortcuts, we might need to update the background profile immediately
@@ -166,9 +180,9 @@ void ShortcutWatcher::runLoop() {
 
 void ShortcutWatcher::updateActiveShortcutFromClass() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    std::string name;
-    auto it = hypr_.class_to_shortcut.find(active_class_);
-    if (it != hypr_.class_to_shortcut.end()) name = it->second;
+    // The runtime owns the class/title rules, so title-based shortcut
+    // selection and hot reload both work without duplicating them here.
+    std::string name = runtime_.shortcutForWindow(active_class_, active_title_);
     if (name.empty()) name = hypr_.default_shortcut;
     
     active_shortcut_name_ = name;
@@ -177,35 +191,16 @@ void ShortcutWatcher::updateActiveShortcutFromClass() {
     if (overlay_valid_ && engaged_) {
         auto sit = hypr_.shortcuts.find(active_shortcut_name_);
         if (sit != hypr_.shortcuts.end() && !sit->second.color.empty()) {
-            cli_.applyPresetParameter(overlay_index_, "color", sit->second.color);
+            runtime_.applyPresetParameter(overlay_index_, "color", sit->second.color);
         }
     }
 }
 
-// --- Helper to restore state based on Active Window ---
+// Recomputes the profile that should be showing for the focused window,
+// rather than restoring a snapshot that may since have gone stale.
 void ShortcutWatcher::restoreActiveProfile() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    // 1. Determine which profile SHOULD be active
-    std::string prof = hypr_.default_profile;
-    auto pit = hypr_.class_to_profile.find(active_class_);
-    if (pit != hypr_.class_to_profile.end()) {
-        prof = pit->second;
-    }
-
-    // 2. Look up the Draw List & Masks for that profile
-    // (This logic mirrors HyprlandWatcher)
-    auto oit = hypr_.profile_draw_order.find(prof);
-    auto mit = hypr_.profile_masks.find(prof);
-
-    if (oit != hypr_.profile_draw_order.end() && mit != hypr_.profile_masks.end()) {
-        // 3. Apply them
-        cli_.applyPresetMasks(mit->second);
-        cli_.setDrawList(oit->second);
-    } else {
-        // Fallback: If profile missing, maybe clear everything?
-        cli_.setDrawList({});
-    }
-    cli_.refreshRender();
+    runtime_.activateProfileForWindow(active_class_, active_title_);
 }
 
 void ShortcutWatcher::applyMaskForMods(int modmask) {
@@ -241,7 +236,7 @@ void ShortcutWatcher::applyMaskForMods(int modmask) {
         if (!engaged_) {
             // Force DrawList to ONLY be the overlay preset
             std::vector<std::size_t> overlay_only = { overlay_index_ };
-            cli_.setDrawList(overlay_only);
+            runtime_.setDrawList(overlay_only);
             engaged_ = true;
         }
 
@@ -249,13 +244,13 @@ void ShortcutWatcher::applyMaskForMods(int modmask) {
         if (!used_profile.empty()) {
             auto sit = hypr_.shortcuts.find(used_profile);
             if (sit != hypr_.shortcuts.end() && !sit->second.color.empty()) {
-                cli_.applyPresetParameter(overlay_index_, "color", sit->second.color);
+                runtime_.applyPresetParameter(overlay_index_, "color", sit->second.color);
             }
         }
         
         // Update Mask (Show specific keys)
-        cli_.applyPresetMask(overlay_index_, mask);
-        cli_.refreshRender();
+        runtime_.applyPresetMask(overlay_index_, mask);
+        runtime_.refreshRender();
         
     } else {
         // === DISENGAGE (RESTORE) ===
@@ -265,7 +260,7 @@ void ShortcutWatcher::applyMaskForMods(int modmask) {
             restoreActiveProfile();
             
             // Clean up overlay state
-            cli_.applyPresetMask(overlay_index_, std::vector<bool>(key_count_, false));
+            runtime_.applyPresetMask(overlay_index_, std::vector<bool>(key_count_, false));
             engaged_ = false;
         }
     }

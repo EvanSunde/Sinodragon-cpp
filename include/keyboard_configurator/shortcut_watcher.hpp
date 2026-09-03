@@ -15,13 +15,13 @@ struct libevdev;
 
 namespace kb::cfg {
 
-class ConfiguratorCLI;
+class Runtime;
 class KeyboardModel;
 
 class ShortcutWatcher {
 public:
     ShortcutWatcher(const KeyboardModel& model,
-                    ConfiguratorCLI& cli,
+                    Runtime& runtime,
                     const HyprConfig& hypr,
                     std::size_t key_count);
     ~ShortcutWatcher();
@@ -29,14 +29,19 @@ public:
     void start();
     void stop();
 
-    // Called from Hyprland watcher when active window class changes
-    // Returns true if shortcuts are currently ENGAGED (overlay active)
-    bool setActiveClass(const std::string& klass);
+    // Called when the focused window changes. Returns true if the overlay is
+    // currently engaged, in which case the caller should leave the profile
+    // alone until the modifier is released.
+    bool setActiveWindow(const std::string& window_class, const std::string& title);
+
+    // Swaps in a freshly loaded config and recompiles the combo tables, so a
+    // hot reload does not need the evdev thread restarted.
+    void reconfigure(const HyprConfig& hypr);
 
 private:
     const KeyboardModel& model_;
-    ConfiguratorCLI& cli_;
-    const HyprConfig hypr_;
+    Runtime& runtime_;
+    HyprConfig hypr_;
     std::size_t key_count_;
 
     // Overlay Configuration
@@ -56,6 +61,7 @@ private:
 
     // State
     std::string active_class_;
+    std::string active_title_;
     std::string active_shortcut_name_;
     
     // Modifiers state: 1=CTRL, 2=SHIFT, 4=ALT, 8=SUPER
@@ -75,6 +81,7 @@ private:
     void openDevices();
     void closeDevices();
 
+    void compileShortcuts();
     void updateActiveShortcutFromClass();
     void applyMaskForMods(int modmask);
     

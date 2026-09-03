@@ -1,16 +1,18 @@
+#include <chrono>
 #include <exception>
 #include <iostream>
+#include <memory>
+#include <string>
 #include <thread>
-#include <chrono>
 
+#include "keyboard_configurator/app_options.hpp"
 #include "keyboard_configurator/config_loader.hpp"
 #include "keyboard_configurator/configurator_cli.hpp"
-#include "keyboard_configurator/effect_engine.hpp"
-#include "keyboard_configurator/retry_helper.hpp"
+#include "keyboard_configurator/control_server.hpp"
+#include "keyboard_configurator/runtime.hpp"
+#include "keyboard_configurator/shutdown_signal.hpp"
 
 #include "keyboard_configurator/doom_fire_preset.hpp"
-#include "keyboard_configurator/hyprland_watcher.hpp"
-#include "keyboard_configurator/key_activity.hpp"
 #include "keyboard_configurator/key_activity_watcher.hpp"
 #include "keyboard_configurator/key_map_preset.hpp"
 #include "keyboard_configurator/liquid_plasma_preset.hpp"
@@ -18,39 +20,26 @@
 #include "keyboard_configurator/reaction_diffusion_preset.hpp"
 #include "keyboard_configurator/reactive_ripple_preset.hpp"
 #include "keyboard_configurator/shortcut_watcher.hpp"
+#include "keyboard_configurator/window_source.hpp"
 #include "keyboard_configurator/smoke_preset.hpp"
+#include "keyboard_configurator/life_preset.hpp"
+#include "keyboard_configurator/pong_preset.hpp"
+#include "keyboard_configurator/snake_preset.hpp"
+#include "keyboard_configurator/tetris_preset.hpp"
+#include "keyboard_configurator/typing_heatmap_preset.hpp"
 #include "keyboard_configurator/space_colonization_preset.hpp"
 #include "keyboard_configurator/star_matrix_preset.hpp"
 #include "keyboard_configurator/static_color_preset.hpp"
-#include "keyboard_configurator/snake_preset.hpp"
+#include "keyboard_configurator/status_light_preset.hpp"
+#include "keyboard_configurator/system_meter_preset.hpp"
 
-using kb::cfg::ConfigLoader;
-using kb::cfg::ConfiguratorCLI;
-using kb::cfg::DeviceTransport;
-using kb::cfg::DoomFirePreset;
-using kb::cfg::EffectEngine;
-using kb::cfg::HyprlandWatcher;
-using kb::cfg::KeyActivityProvider;
-using kb::cfg::KeyActivityWatcher;
-using kb::cfg::KeyMapPreset;
-using kb::cfg::LiquidPlasmaPreset;
-using kb::cfg::PresetRegistry;
-using kb::cfg::RainbowWavePreset;
-using kb::cfg::ReactionDiffusionPreset;
-using kb::cfg::ReactiveRipplePreset;
-using kb::cfg::RetryHelper;
-using kb::cfg::RuntimeConfig;
-using kb::cfg::ShortcutWatcher;
-using kb::cfg::SmokePreset;
-using kb::cfg::SpaceColonizationPreset;
-using kb::cfg::StarMatrixPreset;
-using kb::cfg::StaticColorPreset;
-using kb::cfg::SnakePreset;
+using namespace kb::cfg;
 
 namespace {
 
-PresetRegistry buildRegistry()
-{
+constexpr const char* kVersion = "0.2.0";
+
+PresetRegistry buildRegistry() {
     PresetRegistry registry;
     registry.registerPreset("static_color", [] { return std::make_unique<StaticColorPreset>(); });
     registry.registerPreset("rainbow_wave", [] { return std::make_unique<RainbowWavePreset>(); });
@@ -63,101 +52,153 @@ PresetRegistry buildRegistry()
     registry.registerPreset("doom_fire", [] { return std::make_unique<DoomFirePreset>(); });
     registry.registerPreset("reactive_ripple", [] { return std::make_unique<ReactiveRipplePreset>(); });
     registry.registerPreset("snake", [] { return std::make_unique<SnakePreset>(); });
+    registry.registerPreset("tetris", [] { return std::make_unique<TetrisPreset>(); });
+    registry.registerPreset("pong", [] { return std::make_unique<PongPreset>(); });
+    registry.registerPreset("life", [] { return std::make_unique<LifePreset>(); });
+    registry.registerPreset("typing_heatmap", [] { return std::make_unique<TypingHeatmapPreset>(); });
+    registry.registerPreset("system_meter", [] { return std::make_unique<SystemMeterPreset>(); });
+    registry.registerPreset("status_light", [] { return std::make_unique<StatusLightPreset>(); });
     return registry;
 }
 
-} // namespace
+// Daemon mode has no prompt to sit in, so it just waits until something asks
+// it to stop: a signal, a control-socket quit, or a config change.
+void waitForShutdown(const Runtime& runtime) {
+    while (!shutdownRequested() && !runtime.shouldQuit() && !runtime.configChanged()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+}
 
-int main(int argc, char** argv)
-{
+}  // namespace
+
+int main(int argc, char** argv) {
+    const AppOptions options = parseArgs(argc, argv);
+
+    if (!options.valid) {
+        std::cerr << "kb_configurator: " << options.error << "\n\n" << usageText() << '\n';
+        return 2;
+    }
+    if (options.show_help) {
+        std::cout << usageText() << '\n';
+        return 0;
+    }
+    if (options.show_version) {
+        std::cout << "kb_configurator " << kVersion << '\n';
+        return 0;
+    }
+
+    installShutdownHandlers();
+
     try {
-        auto registry = buildRegistry();
+        const auto registry = buildRegistry();
         ConfigLoader loader(registry);
-
-        std::string config_path = "configs/example.cfg";
-        if (argc > 1) {
-            config_path = argv[1];
+        if (options.preview) {
+            loader.forceTransport("preview");
         }
 
-        // Reload loop - when config changes, we restart
         while (true) {
-            RuntimeConfig runtime = loader.loadFromFile(config_path);
+            Runtime runtime(loader.loadFromFile(options.config_path), options.config_path, loader);
 
-            auto transport = std::move(runtime.transport);
-            
-            // Use exponential backoff retry when connecting to device
-            RetryHelper retry_helper;
-            bool connected = retry_helper.executeWithRetry(
-                [&transport, &runtime]() {
-                    return transport->connect(runtime.model);
-                },
-                "Device connection"
-            );
-
-            if (!connected) {
+            if (!runtime.connect()) {
                 throw std::runtime_error("Failed to connect to device after retries");
             }
 
-            auto key_activity = std::make_shared<KeyActivityProvider>(runtime.model.keyCount());
-
-            EffectEngine engine(runtime.model, *transport);
-            engine.setKeyActivityProvider(key_activity);
-            engine.setPresets(std::move(runtime.presets), std::move(runtime.preset_masks));
-            // Apply enabled flags from config
-            for (std::size_t i = 0; i < runtime.preset_enabled.size(); ++i) {
-                engine.setPresetEnabled(i, runtime.preset_enabled[i]);
-            }
-
-            ConfiguratorCLI cli(runtime.model,
-                engine,
-                std::move(runtime.preset_parameters),
-                runtime.frame_interval);
-
-            // Set config path for optional watching
-            cli.setConfigPath(config_path);
+            runtime.start();
 
             std::unique_ptr<KeyActivityWatcher> key_watcher;
-            if (runtime.model.hasKeycodeMap()) {
-                key_watcher = std::make_unique<KeyActivityWatcher>(runtime.model, key_activity);
+            if (runtime.model().hasKeycodeMap()) {
+                key_watcher = std::make_unique<KeyActivityWatcher>(runtime.model(), runtime.keyActivity());
                 key_watcher->start();
             }
 
             std::unique_ptr<ShortcutWatcher> shortcuts;
-            std::unique_ptr<HyprlandWatcher> hypr;
-            if (runtime.hypr && runtime.hypr->enabled) {
-                // Start shortcut watcher first so hypr callback can safely reference it
-                if (runtime.hypr->shortcuts_overlay_preset_index >= 0) {
-                    shortcuts = std::make_unique<ShortcutWatcher>(runtime.model, cli, *runtime.hypr, runtime.model.keyCount());
+            std::unique_ptr<WindowSource> windows;
+
+            // A snapshot, because the config watcher may already be running and
+            // a reload replaces the runtime's copy underneath us.
+            const std::optional<HyprConfig> hypr_snapshot = runtime.hyprConfig();
+            if (hypr_snapshot && hypr_snapshot->enabled) {
+                const HyprConfig& hypr_config = *hypr_snapshot;
+                if (hypr_config.shortcuts_overlay_preset_index >= 0) {
+                    shortcuts = std::make_unique<ShortcutWatcher>(runtime.model(), runtime, hypr_config,
+                                                                 runtime.model().keyCount());
                     shortcuts->start();
-                }
-                hypr = std::make_unique<HyprlandWatcher>(*runtime.hypr, cli, engine.presetCount());
-                if (shortcuts) {
-                    hypr->setActiveClassCallback([sw = shortcuts.get()](const std::string& klass) {
-                        return sw->setActiveClass(klass);
+                    // A reload rebuilds the shortcut tables in place rather
+                    // than restarting the evdev watcher.
+                    runtime.setConfigObserver([watcher = shortcuts.get()](const HyprConfig& updated) {
+                        watcher->reconfigure(updated);
                     });
                 }
-                hypr->start();
+
+                windows = createWindowSource(hypr_config.window_source, hypr_config.events_socket);
+                if (windows) {
+                    std::cout << "[Window] Using the " << windows->id() << " backend.\n";
+                    windows->start([&runtime, watcher = shortcuts.get()](const WindowInfo& info) {
+                        // The shortcut overlay gets first refusal: while a
+                        // modifier is held it owns the display, and swapping
+                        // the profile underneath it would flicker.
+                        const bool overlay_engaged =
+                            watcher != nullptr && watcher->setActiveWindow(info.window_class, info.title);
+                        if (!overlay_engaged) {
+                            runtime.activateProfileForWindow(info.window_class, info.title);
+                        }
+                    });
+                }
             }
 
-            cli.run();
+            std::unique_ptr<ControlServer> control;
+            if (options.enable_socket) {
+                control = std::make_unique<ControlServer>(
+                    runtime, options.socket_path.empty() ? defaultControlSocketPath()
+                                                         : options.socket_path);
+                if (!control->start()) {
+                    // A daemon that cannot be controlled is still better than
+                    // no daemon; carry on with the lighting.
+                    std::cerr << "[Main] Continuing without a control socket.\n";
+                    control.reset();
+                }
+            }
 
-            // Cleanup
+            if (options.daemon) {
+                std::cout << "[Main] Running in daemon mode; send SIGTERM to stop.\n" << std::flush;
+                waitForShutdown(runtime);
+            } else {
+                ConfiguratorCLI cli(runtime);
+                cli.run();
+            }
+
+            if (control) {
+                control->stop();
+            }
             if (key_watcher) {
                 key_watcher->stop();
             }
-            if (hypr) {
-                hypr->stop();
+            if (windows) {
+                windows->stop();
             }
             if (shortcuts) {
                 shortcuts->stop();
             }
 
-            // If config changed (user enabled watch and it detected a change), reload
-            if (cli.isConfigChanged()) {
-                std::cout << "[Main] Reloading configuration...\n";
-            } else {
+            const bool reload = runtime.configChanged() && !runtime.shouldQuit() && !shutdownRequested();
+
+            if (shutdownRequested()) {
+                std::cout << "[Main] Signal " << shutdownSignal() << "; shutting down.\n";
+            }
+
+            // Stop the render thread *before* blanking: otherwise the next
+            // frame it pushes lands on top of the black one and the keyboard
+            // stays lit after we exit.
+            runtime.stop();
+
+            if (!reload) {
+                runtime.blank();
+            }
+
+            if (!reload) {
                 break;
             }
+            std::cout << "[Main] Reloading configuration...\n";
         }
 
         return 0;

@@ -100,3 +100,61 @@ This document describes the various effects and the configuration options availa
         - intensity (Float): The brightness of the ripple effect.
         - color (Hex color code): The color of the ripples (e.g., #00AAFF for cyan/blue).
         - base_color (Hex color code): The background color when inactive (e.g., #000010 for very dark blue/black).
+### space_colonization
+
+    - Description: Branching structures that grow towards randomly scattered attractors, like roots or lightning. Keystrokes seed new roots.
+    - Options:
+        - attractors (Integer): How many growth targets are scattered across the board.
+        - kill_dist (Float): Distance at which a branch consumes an attractor.
+        - influence_dist (Float): How far an attractor can pull a branch towards it.
+        - segment_len (Float): Length of one growth step.
+        - growth_interval (Float): Seconds between growth ticks.
+        - lifespan (Float): Seconds a node stays lit before it starts to fade.
+        - fade_time (Float): Seconds to fade out after the lifespan expires.
+        - thickness (Float): Base branch radius.
+        - color_root, color_tip (Hex color codes): Gradient along distance from the root.
+        - reactive (Boolean): Seed new roots from keystrokes. Default true.
+
+### typing_heatmap
+
+    - Description: Shows where you actually type. Each press adds heat to its key, heat bleeds into neighbours and decays over time, and the palette runs cold to hot. A layer rather than a game -- stack it over a dim base with blend = "screen".
+    - Options:
+        - half_life (Float): Seconds for a key's heat to fall to 1/e of its value.
+        - gain (Float): Heat added per keypress.
+        - spread (Float, 0.0 to 1.0): How much heat bleeds into physically adjacent keys.
+        - ceiling (Float): Heat value that counts as fully hot.
+        - palette (Comma-separated hex codes): Cold to hot. Defaults to blue through cyan and yellow to white.
+        - color_cold (Hex color code): Colour for keys with no heat at all.
+
+### system_meter
+
+    - Description: Draws a value as a bar across a named run of keys.
+    - Options:
+        - metric (String): cpu, memory, load, battery, or any name fed by `sinoctl metric <name> <0..1>`.
+        - bar_keys (Array of key labels): The keys the bar fills, in order. Without it the whole board is used and the layer's own zones/keys mask decides what shows.
+        - smoothing (Float, 0.0 to 0.99): How much of the previous reading to keep. Higher is calmer.
+        - invert (Boolean): Fill from full towards empty instead.
+        - pulse_when_charging (Boolean): Battery only. Default true.
+        - color_low, color_mid, color_high (Hex color codes): The gradient along the bar.
+        - color_empty (Hex color code): Unlit cells.
+    - Note: unlit cells are painted color_empty, so stacked meters need blend = "add" or each will erase the one below.
+
+### status_light
+
+    - Description: Shows a named state pushed in over the control socket, so a CI script or a git hook can drive the keyboard.
+    - Options:
+        - signal (String): The state name to watch, e.g. "build".
+        - keys (Array of key labels): Which keys to light. Defaults to the whole board.
+        - ok_timeout (Float): Seconds after which a settled "ok" fades out. 0 keeps it lit.
+        - color_<state> (Hex color code): Colour for a state. Built in: ok, warn, fail, busy.
+        - style_<state> (String): solid, pulse or sweep.
+        - color_off (Hex color code): Shown when the state is unset or "off".
+
+### Games: snake, tetris, pong, life
+
+    - Description: Take the whole keyboard over while running. Start and stop them with `sinoctl game <name> start|stop`; declare one as a layer in its own profile to make it available. All of them need the keycodes CSV, which is how they read input.
+    - Options:
+        - snake: step_interval (Float) -- seconds per move.
+        - tetris: step_interval (Float), background, palette (Comma-separated hex codes).
+        - pong: ball_speed, ai_speed, paddle_height (Floats); color_player, color_ai, color_ball, background.
+        - life: step_interval (Float), density (Float, 0.0 to 1.0 seeding density); color_alive, color_new, background.

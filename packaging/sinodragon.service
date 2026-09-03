@@ -1,0 +1,40 @@
+# systemd user unit for the Sinodragon keyboard lighting daemon.
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp packaging/sinodragon.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now sinodragon
+#
+# The daemon needs read access to /dev/hidrawN and /dev/input/event*; install
+# packaging/99-sinodragon.rules first or it will start and find no device.
+
+[Unit]
+Description=Sinodragon keyboard RGB daemon
+Documentation=https://github.com/EvanSunde/Sinodragon-cpp
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kb_configurator --daemon
+ExecReload=/usr/local/bin/sinoctl reload
+
+# The daemon reconnects on its own when the keyboard is unplugged, so a restart
+# here is only for an outright crash.
+Restart=on-failure
+RestartSec=5s
+
+# It talks to one HID device and one unix socket and nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+MemoryDenyWriteExecute=true
+RuntimeDirectory=sinodragon
+
+[Install]
+WantedBy=graphical-session.target

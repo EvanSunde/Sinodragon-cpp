@@ -19,10 +19,21 @@ struct ShortcutProfileConfig {
     std::unordered_map<int, std::vector<std::string>> combos;
 };
 
+// A window-title rule. Rules are evaluated in config order and the first
+// match wins, which is why this is an ordered vector rather than a map.
+struct TitleRule {
+    std::string contains;       // matched case-insensitively against the title
+    std::string window_class;   // optional: only apply within this class
+    std::string profile;
+    std::string shortcut;
+};
+
 struct HyprConfig {
     bool enabled{false};
     std::string events_socket;
+    std::string window_source{"auto"};
     std::string default_profile;
+    std::vector<TitleRule> title_rules;
     
     std::unordered_map<std::string, std::string> class_to_profile;
     
@@ -53,6 +64,14 @@ struct RuntimeConfig {
     
     std::vector<std::vector<bool>> preset_masks;
     std::vector<bool> preset_enabled;
+    std::vector<LayerStyle> preset_styles;
+
+    // Master brightness as a percentage, 0-100.
+    int brightness{100};
+
+    // [device] config_watch_mode: start watching the config file immediately
+    // rather than waiting for a `watch on` command.
+    bool config_watch_mode{false};
     
     std::optional<HyprConfig> hypr;
 };
@@ -62,8 +81,13 @@ public:
     explicit ConfigLoader(const PresetRegistry& registry);
     [[nodiscard]] RuntimeConfig loadFromFile(const std::string& path) const;
 
+    // Overrides the config's transport, so --preview works against any config
+    // without editing it.
+    void forceTransport(std::string transport_id) { forced_transport_ = std::move(transport_id); }
+
 private:
     const PresetRegistry& registry_;
+    std::string forced_transport_;
 };
 
 }  // namespace kb::cfg

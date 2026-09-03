@@ -1,5 +1,7 @@
 #include "keyboard_configurator/keyboard_model.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 
@@ -85,10 +87,17 @@ void KeyboardModel::setKeycodeMap(const std::vector<int>& keycodes) {
     }
 }
 
-std::vector<std::uint8_t> KeyboardModel::encodeFrame(const KeyColorFrame& frame) const {
+std::vector<std::uint8_t> KeyboardModel::encodeFrame(const KeyColorFrame& frame,
+                                                     double brightness) const {
     if (frame.size() != key_labels_.size()) {
         throw std::runtime_error("Frame size does not match keyboard layout");
     }
+
+    const double scale = std::clamp(brightness, 0.0, 1.0);
+    const bool dim = scale < 1.0;
+    const auto apply = [scale](std::uint8_t channel) {
+        return static_cast<std::uint8_t>(std::lround(channel * scale));
+    };
 
     std::vector<std::uint8_t> payload;
     payload.reserve(packet_header_.size() + key_labels_.size() * 3);
@@ -99,6 +108,8 @@ std::vector<std::uint8_t> KeyboardModel::encodeFrame(const KeyColorFrame& frame)
         auto color = frame.color(idx);
         if (label == "NAN") {
             color = {0, 0, 0};
+        } else if (dim) {
+            color = {apply(color.r), apply(color.g), apply(color.b)};
         }
         payload.push_back(color.r);
         payload.push_back(color.g);
