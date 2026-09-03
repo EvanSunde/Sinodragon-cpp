@@ -113,8 +113,12 @@ int main(int argc, char** argv) {
 
             std::unique_ptr<ShortcutWatcher> shortcuts;
             std::unique_ptr<WindowSource> windows;
-            if (runtime.hypr() && runtime.hypr()->enabled) {
-                const HyprConfig& hypr_config = *runtime.hypr();
+
+            // A snapshot, because the config watcher may already be running and
+            // a reload replaces the runtime's copy underneath us.
+            const std::optional<HyprConfig> hypr_snapshot = runtime.hyprConfig();
+            if (hypr_snapshot && hypr_snapshot->enabled) {
+                const HyprConfig& hypr_config = *hypr_snapshot;
                 if (hypr_config.shortcuts_overlay_preset_index >= 0) {
                     shortcuts = std::make_unique<ShortcutWatcher>(runtime.model(), runtime, hypr_config,
                                                                  runtime.model().keyCount());

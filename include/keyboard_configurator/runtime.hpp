@@ -57,7 +57,10 @@ public:
     [[nodiscard]] const KeyboardModel& model() const noexcept { return model_; }
     [[nodiscard]] KeyActivityProviderPtr keyActivity() const noexcept { return key_activity_; }
     [[nodiscard]] SystemStatePtr systemState() const noexcept { return system_state_; }
-    [[nodiscard]] const std::optional<HyprConfig>& hypr() const noexcept { return hypr_; }
+    // Returns a copy, not a reference: reload() replaces hypr_ under the
+    // engine lock, so handing out a reference would let a caller read it
+    // while the config watcher is rewriting it.
+    [[nodiscard]] std::optional<HyprConfig> hyprConfig() const;
     [[nodiscard]] std::size_t presetCount() const;
     [[nodiscard]] bool shouldQuit() const noexcept { return quit_requested_.load(); }
     [[nodiscard]] bool configChanged() const noexcept { return config_changed_.load(); }

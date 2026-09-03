@@ -84,6 +84,11 @@ bool Runtime::connect() {
                                   "Device connection");
 }
 
+std::optional<HyprConfig> Runtime::hyprConfig() const {
+    std::lock_guard<std::mutex> guard(engine_mutex_);
+    return hypr_;
+}
+
 std::size_t Runtime::presetCount() const {
     std::lock_guard<std::mutex> guard(engine_mutex_);
     return engine_.presetCount();
