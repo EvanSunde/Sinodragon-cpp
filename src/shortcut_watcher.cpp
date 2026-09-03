@@ -11,7 +11,7 @@
 
 #include <libevdev/libevdev.h>
 
-#include "keyboard_configurator/configurator_cli.hpp"
+#include "keyboard_configurator/runtime.hpp"
 #include "keyboard_configurator/keyboard_model.hpp"
 
 namespace kb::cfg {
@@ -24,10 +24,10 @@ static inline bool is_super(int code) { return code == KEY_LEFTMETA || code == K
 }
 
 ShortcutWatcher::ShortcutWatcher(const KeyboardModel& model,
-                                 ConfiguratorCLI& cli,
+                                 Runtime& runtime,
                                  const HyprConfig& hypr,
                                  std::size_t key_count)
-    : model_(model), cli_(cli), hypr_(hypr), key_count_(key_count) {
+    : model_(model), runtime_(runtime), hypr_(hypr), key_count_(key_count) {
     
     if (hypr_.shortcuts_overlay_preset_index >= 0) {
         overlay_index_ = static_cast<std::size_t>(hypr_.shortcuts_overlay_preset_index);
@@ -177,35 +177,25 @@ void ShortcutWatcher::updateActiveShortcutFromClass() {
     if (overlay_valid_ && engaged_) {
         auto sit = hypr_.shortcuts.find(active_shortcut_name_);
         if (sit != hypr_.shortcuts.end() && !sit->second.color.empty()) {
-            cli_.applyPresetParameter(overlay_index_, "color", sit->second.color);
+            runtime_.applyPresetParameter(overlay_index_, "color", sit->second.color);
         }
     }
 }
 
-// --- Helper to restore state based on Active Window ---
+// Recomputes the profile that should be showing for the focused window,
+// rather than restoring a snapshot that may since have gone stale.
 void ShortcutWatcher::restoreActiveProfile() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    // 1. Determine which profile SHOULD be active
     std::string prof = hypr_.default_profile;
     auto pit = hypr_.class_to_profile.find(active_class_);
     if (pit != hypr_.class_to_profile.end()) {
         prof = pit->second;
     }
-
-    // 2. Look up the Draw List & Masks for that profile
-    // (This logic mirrors HyprlandWatcher)
-    auto oit = hypr_.profile_draw_order.find(prof);
-    auto mit = hypr_.profile_masks.find(prof);
-
-    if (oit != hypr_.profile_draw_order.end() && mit != hypr_.profile_masks.end()) {
-        // 3. Apply them
-        cli_.applyPresetMasks(mit->second);
-        cli_.setDrawList(oit->second);
+    if (!prof.empty()) {
+        runtime_.activateProfile(prof);
     } else {
-        // Fallback: If profile missing, maybe clear everything?
-        cli_.setDrawList({});
+        runtime_.setDrawList({});
     }
-    cli_.refreshRender();
 }
 
 void ShortcutWatcher::applyMaskForMods(int modmask) {
@@ -241,7 +231,7 @@ void ShortcutWatcher::applyMaskForMods(int modmask) {
         if (!engaged_) {
             // Force DrawList to ONLY be the overlay preset
             std::vector<std::size_t> overlay_only = { overlay_index_ };
-            cli_.setDrawList(overlay_only);
+            runtime_.setDrawList(overlay_only);
             engaged_ = true;
         }
 
@@ -249,13 +239,13 @@ void ShortcutWatcher::applyMaskForMods(int modmask) {
         if (!used_profile.empty()) {
             auto sit = hypr_.shortcuts.find(used_profile);
             if (sit != hypr_.shortcuts.end() && !sit->second.color.empty()) {
-                cli_.applyPresetParameter(overlay_index_, "color", sit->second.color);
+                runtime_.applyPresetParameter(overlay_index_, "color", sit->second.color);
             }
         }
         
         // Update Mask (Show specific keys)
-        cli_.applyPresetMask(overlay_index_, mask);
-        cli_.refreshRender();
+        runtime_.applyPresetMask(overlay_index_, mask);
+        runtime_.refreshRender();
         
     } else {
         // === DISENGAGE (RESTORE) ===
@@ -265,7 +255,7 @@ void ShortcutWatcher::applyMaskForMods(int modmask) {
             restoreActiveProfile();
             
             // Clean up overlay state
-            cli_.applyPresetMask(overlay_index_, std::vector<bool>(key_count_, false));
+            runtime_.applyPresetMask(overlay_index_, std::vector<bool>(key_count_, false));
             engaged_ = false;
         }
     }

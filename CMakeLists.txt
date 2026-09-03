@@ -59,6 +59,7 @@ add_library(keyboard_configurator STATIC
     src/space_colonization_preset.cpp
     src/snake_preset.cpp
     src/effect_engine.cpp
+    src/runtime.cpp
     src/config_loader.cpp
     src/configurator_cli.cpp
     src/hyprland_watcher.cpp

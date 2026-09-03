@@ -15,13 +15,13 @@ struct libevdev;
 
 namespace kb::cfg {
 
-class ConfiguratorCLI;
+class Runtime;
 class KeyboardModel;
 
 class ShortcutWatcher {
 public:
     ShortcutWatcher(const KeyboardModel& model,
-                    ConfiguratorCLI& cli,
+                    Runtime& runtime,
                     const HyprConfig& hypr,
                     std::size_t key_count);
     ~ShortcutWatcher();
@@ -35,7 +35,7 @@ public:
 
 private:
     const KeyboardModel& model_;
-    ConfiguratorCLI& cli_;
+    Runtime& runtime_;
     const HyprConfig hypr_;
     std::size_t key_count_;
 

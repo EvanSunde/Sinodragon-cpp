@@ -41,6 +41,10 @@ public:
     void renderFrame(double time_seconds);
     bool pushFrame();
 
+    // Exposed so a caller can encode the frame under its own lock and then do
+    // the device write without holding it.
+    [[nodiscard]] const KeyColorFrame& frame() const noexcept { return frame_; }
+
 private:
     void applyKeyActivityProvider();
 

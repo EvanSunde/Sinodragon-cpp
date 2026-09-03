@@ -1,16 +1,14 @@
 #include <exception>
 #include <iostream>
-#include <thread>
-#include <chrono>
+#include <memory>
+#include <string>
 
 #include "keyboard_configurator/config_loader.hpp"
 #include "keyboard_configurator/configurator_cli.hpp"
-#include "keyboard_configurator/effect_engine.hpp"
-#include "keyboard_configurator/retry_helper.hpp"
+#include "keyboard_configurator/runtime.hpp"
 
 #include "keyboard_configurator/doom_fire_preset.hpp"
 #include "keyboard_configurator/hyprland_watcher.hpp"
-#include "keyboard_configurator/key_activity.hpp"
 #include "keyboard_configurator/key_activity_watcher.hpp"
 #include "keyboard_configurator/key_map_preset.hpp"
 #include "keyboard_configurator/liquid_plasma_preset.hpp"
@@ -19,38 +17,16 @@
 #include "keyboard_configurator/reactive_ripple_preset.hpp"
 #include "keyboard_configurator/shortcut_watcher.hpp"
 #include "keyboard_configurator/smoke_preset.hpp"
+#include "keyboard_configurator/snake_preset.hpp"
 #include "keyboard_configurator/space_colonization_preset.hpp"
 #include "keyboard_configurator/star_matrix_preset.hpp"
 #include "keyboard_configurator/static_color_preset.hpp"
-#include "keyboard_configurator/snake_preset.hpp"
 
-using kb::cfg::ConfigLoader;
-using kb::cfg::ConfiguratorCLI;
-using kb::cfg::DeviceTransport;
-using kb::cfg::DoomFirePreset;
-using kb::cfg::EffectEngine;
-using kb::cfg::HyprlandWatcher;
-using kb::cfg::KeyActivityProvider;
-using kb::cfg::KeyActivityWatcher;
-using kb::cfg::KeyMapPreset;
-using kb::cfg::LiquidPlasmaPreset;
-using kb::cfg::PresetRegistry;
-using kb::cfg::RainbowWavePreset;
-using kb::cfg::ReactionDiffusionPreset;
-using kb::cfg::ReactiveRipplePreset;
-using kb::cfg::RetryHelper;
-using kb::cfg::RuntimeConfig;
-using kb::cfg::ShortcutWatcher;
-using kb::cfg::SmokePreset;
-using kb::cfg::SpaceColonizationPreset;
-using kb::cfg::StarMatrixPreset;
-using kb::cfg::StaticColorPreset;
-using kb::cfg::SnakePreset;
+using namespace kb::cfg;
 
 namespace {
 
-PresetRegistry buildRegistry()
-{
+PresetRegistry buildRegistry() {
     PresetRegistry registry;
     registry.registerPreset("static_color", [] { return std::make_unique<StaticColorPreset>(); });
     registry.registerPreset("rainbow_wave", [] { return std::make_unique<RainbowWavePreset>(); });
@@ -66,82 +42,56 @@ PresetRegistry buildRegistry()
     return registry;
 }
 
-} // namespace
+}  // namespace
 
-int main(int argc, char** argv)
-{
+int main(int argc, char** argv) {
     try {
-        auto registry = buildRegistry();
+        const auto registry = buildRegistry();
         ConfigLoader loader(registry);
 
-        std::string config_path = "configs/example.cfg";
+        std::string config_path = "configs/config.toml";
         if (argc > 1) {
             config_path = argv[1];
         }
 
-        // Reload loop - when config changes, we restart
+        // Reloading rebuilds the whole runtime; the loop is what lets the
+        // config watcher restart the session in place of the process.
         while (true) {
-            RuntimeConfig runtime = loader.loadFromFile(config_path);
+            Runtime runtime(loader.loadFromFile(config_path), config_path);
 
-            auto transport = std::move(runtime.transport);
-            
-            // Use exponential backoff retry when connecting to device
-            RetryHelper retry_helper;
-            bool connected = retry_helper.executeWithRetry(
-                [&transport, &runtime]() {
-                    return transport->connect(runtime.model);
-                },
-                "Device connection"
-            );
-
-            if (!connected) {
+            if (!runtime.connect()) {
                 throw std::runtime_error("Failed to connect to device after retries");
             }
 
-            auto key_activity = std::make_shared<KeyActivityProvider>(runtime.model.keyCount());
-
-            EffectEngine engine(runtime.model, *transport);
-            engine.setKeyActivityProvider(key_activity);
-            engine.setPresets(std::move(runtime.presets), std::move(runtime.preset_masks));
-            // Apply enabled flags from config
-            for (std::size_t i = 0; i < runtime.preset_enabled.size(); ++i) {
-                engine.setPresetEnabled(i, runtime.preset_enabled[i]);
-            }
-
-            ConfiguratorCLI cli(runtime.model,
-                engine,
-                std::move(runtime.preset_parameters),
-                runtime.frame_interval);
-
-            // Set config path for optional watching
-            cli.setConfigPath(config_path);
+            runtime.start();
 
             std::unique_ptr<KeyActivityWatcher> key_watcher;
-            if (runtime.model.hasKeycodeMap()) {
-                key_watcher = std::make_unique<KeyActivityWatcher>(runtime.model, key_activity);
+            if (runtime.model().hasKeycodeMap()) {
+                key_watcher = std::make_unique<KeyActivityWatcher>(runtime.model(), runtime.keyActivity());
                 key_watcher->start();
             }
 
             std::unique_ptr<ShortcutWatcher> shortcuts;
             std::unique_ptr<HyprlandWatcher> hypr;
-            if (runtime.hypr && runtime.hypr->enabled) {
-                // Start shortcut watcher first so hypr callback can safely reference it
-                if (runtime.hypr->shortcuts_overlay_preset_index >= 0) {
-                    shortcuts = std::make_unique<ShortcutWatcher>(runtime.model, cli, *runtime.hypr, runtime.model.keyCount());
+            if (runtime.hypr() && runtime.hypr()->enabled) {
+                const HyprConfig& hypr_config = *runtime.hypr();
+                if (hypr_config.shortcuts_overlay_preset_index >= 0) {
+                    shortcuts = std::make_unique<ShortcutWatcher>(runtime.model(), runtime, hypr_config,
+                                                                 runtime.model().keyCount());
                     shortcuts->start();
                 }
-                hypr = std::make_unique<HyprlandWatcher>(*runtime.hypr, cli, engine.presetCount());
+                hypr = std::make_unique<HyprlandWatcher>(hypr_config, runtime, runtime.presetCount());
                 if (shortcuts) {
-                    hypr->setActiveClassCallback([sw = shortcuts.get()](const std::string& klass) {
-                        return sw->setActiveClass(klass);
+                    hypr->setActiveClassCallback([watcher = shortcuts.get()](const std::string& klass) {
+                        return watcher->setActiveClass(klass);
                     });
                 }
                 hypr->start();
             }
 
+            ConfiguratorCLI cli(runtime);
             cli.run();
 
-            // Cleanup
             if (key_watcher) {
                 key_watcher->stop();
             }
@@ -152,12 +102,13 @@ int main(int argc, char** argv)
                 shortcuts->stop();
             }
 
-            // If config changed (user enabled watch and it detected a change), reload
-            if (cli.isConfigChanged()) {
-                std::cout << "[Main] Reloading configuration...\n";
-            } else {
+            const bool reload = runtime.configChanged() && !runtime.shouldQuit();
+            runtime.stop();
+
+            if (!reload) {
                 break;
             }
+            std::cout << "[Main] Reloading configuration...\n";
         }
 
         return 0;

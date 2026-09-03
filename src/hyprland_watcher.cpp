@@ -14,7 +14,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include "keyboard_configurator/configurator_cli.hpp"
+#include "keyboard_configurator/runtime.hpp"
 
 namespace kb::cfg {
 
@@ -26,8 +26,8 @@ std::string getenv_or(const char* key, const char* fallback) {
 }
 }
 
-HyprlandWatcher::HyprlandWatcher(HyprConfig cfg, ConfiguratorCLI& cli, std::size_t preset_count)
-    : cfg_(std::move(cfg)), cli_(cli), preset_count_(preset_count) {}
+HyprlandWatcher::HyprlandWatcher(HyprConfig cfg, Runtime& runtime, std::size_t preset_count)
+    : cfg_(std::move(cfg)), runtime_(runtime), preset_count_(preset_count) {}
 
 HyprlandWatcher::~HyprlandWatcher() { stop(); }
 
@@ -140,35 +140,17 @@ void HyprlandWatcher::runLoop(std::string socket_path) {
                         continue;
                     }
 
-                    // --- Painter's Algorithm Logic ---
-                    if (!cfg_.profile_draw_order.empty()) {
-                        std::string prof;
-                        auto pit = cfg_.class_to_profile.find(appClass);
-                        if (pit != cfg_.class_to_profile.end()) {
-                            prof = pit->second;
-                        } else {
-                            prof = cfg_.default_profile;
-                        }
-
-                        auto oit = cfg_.profile_draw_order.find(prof);
-                        auto mit = cfg_.profile_masks.find(prof);
-
-                        if (oit != cfg_.profile_draw_order.end() && mit != cfg_.profile_masks.end()) {
-                            // 1. Get the ordered playlist
-                            const std::vector<std::size_t>& draw_list = oit->second;
-                            
-                            // 2. Get the masks (ensure size safety)
-                            std::vector<std::vector<bool>> masks = mit->second;
-                            if (masks.size() != preset_count_) {
-                                masks.resize(preset_count_, std::vector<bool>());
-                            }
-
-                            // 3. Apply to CLI -> Engine
-                            cli_.applyPresetMasks(masks);
-                            cli_.setDrawList(draw_list); // Calls the new Painter's Algo method
-                            cli_.refreshRender();
-                            continue;
-                        }
+                    // Hand the profile name to the runtime, which owns the
+                    // draw list and the masks and knows how to size them.
+                    std::string prof;
+                    auto pit = cfg_.class_to_profile.find(appClass);
+                    if (pit != cfg_.class_to_profile.end()) {
+                        prof = pit->second;
+                    } else {
+                        prof = cfg_.default_profile;
+                    }
+                    if (!prof.empty()) {
+                        runtime_.activateProfile(prof);
                     }
                 }
             }

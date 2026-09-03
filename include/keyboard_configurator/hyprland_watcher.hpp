@@ -11,11 +11,11 @@
 
 namespace kb::cfg {
 
-class ConfiguratorCLI;
+class Runtime;
 
 class HyprlandWatcher {
 public:
-    HyprlandWatcher(HyprConfig cfg, ConfiguratorCLI& cli, std::size_t preset_count);
+    HyprlandWatcher(HyprConfig cfg, Runtime& runtime, std::size_t preset_count);
     ~HyprlandWatcher();
 
     void start();
@@ -24,7 +24,7 @@ public:
 
 private:
     HyprConfig cfg_;
-    ConfiguratorCLI& cli_;
+    Runtime& runtime_;
     std::size_t preset_count_;
     std::atomic<bool> stop_{false};
     std::thread thread_;
