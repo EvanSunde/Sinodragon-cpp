@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
     const AppOptions options = parseArgs(argc, argv);
 
     if (!options.valid) {
-        std::cerr << "kb_configurator: " << options.error << "\n\n" << usageText() << '\n';
+        std::cerr << "sinodragon: " << options.error << "\n\n" << usageText() << '\n';
         return 2;
     }
     if (options.show_help) {
@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (options.show_version) {
-        std::cout << "kb_configurator " << kVersion << '\n';
+        std::cout << "sinodragon " << kVersion << '\n';
         return 0;
     }
 

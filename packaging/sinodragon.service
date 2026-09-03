@@ -16,7 +16,7 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/kb_configurator --daemon
+ExecStart=/usr/local/bin/sinodragon --daemon
 ExecReload=/usr/local/bin/sinoctl reload
 
 # The daemon reconnects on its own when the keyboard is unplugged, so a restart
