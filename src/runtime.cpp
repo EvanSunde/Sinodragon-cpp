@@ -1,6 +1,7 @@
 #include "keyboard_configurator/runtime.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <optional>
 #include <iostream>
 #include <sstream>
@@ -218,21 +219,77 @@ bool Runtime::applyProfileLocked(const std::string& profile) {
     return true;
 }
 
-void Runtime::activateProfileForWindow(const std::string& window_class) {
+namespace {
+
+// Case-insensitive substring test, so a rule for "youtube" matches a title
+// reading "YouTube".
+bool containsFold(const std::string& haystack, const std::string& needle) {
+    if (needle.empty()) {
+        return false;
+    }
+    const auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(),
+                                [](unsigned char a, unsigned char b) {
+                                    return std::tolower(a) == std::tolower(b);
+                                });
+    return it != haystack.end();
+}
+
+}  // namespace
+
+void Runtime::activateProfileForWindow(const std::string& window_class, const std::string& title) {
     {
         std::lock_guard<std::mutex> guard(engine_mutex_);
         if (!hypr_) {
             return;
         }
-        auto it = hypr_->class_to_profile.find(window_class);
-        const std::string profile =
-            (it != hypr_->class_to_profile.end()) ? it->second : hypr_->default_profile;
+
+        std::string profile;
+
+        // Title rules are more specific than class mappings, so they win.
+        for (const auto& rule : hypr_->title_rules) {
+            if (rule.profile.empty()) {
+                continue;
+            }
+            if (!rule.window_class.empty() && rule.window_class != window_class) {
+                continue;
+            }
+            if (containsFold(title, rule.contains)) {
+                profile = rule.profile;
+                break;
+            }
+        }
+
+        if (profile.empty()) {
+            auto it = hypr_->class_to_profile.find(window_class);
+            profile = (it != hypr_->class_to_profile.end()) ? it->second : hypr_->default_profile;
+        }
         if (profile.empty()) {
             return;
         }
         applyProfileLocked(profile);
     }
     wake();
+}
+
+std::string Runtime::shortcutForWindow(const std::string& window_class,
+                                       const std::string& title) const {
+    std::lock_guard<std::mutex> guard(engine_mutex_);
+    if (!hypr_) {
+        return {};
+    }
+    for (const auto& rule : hypr_->title_rules) {
+        if (rule.shortcut.empty()) {
+            continue;
+        }
+        if (!rule.window_class.empty() && rule.window_class != window_class) {
+            continue;
+        }
+        if (containsFold(title, rule.contains)) {
+            return rule.shortcut;
+        }
+    }
+    auto it = hypr_->class_to_shortcut.find(window_class);
+    return (it != hypr_->class_to_shortcut.end()) ? it->second : std::string{};
 }
 
 void Runtime::activateProfile(const std::string& profile) {

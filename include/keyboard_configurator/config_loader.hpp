@@ -19,10 +19,21 @@ struct ShortcutProfileConfig {
     std::unordered_map<int, std::vector<std::string>> combos;
 };
 
+// A window-title rule. Rules are evaluated in config order and the first
+// match wins, which is why this is an ordered vector rather than a map.
+struct TitleRule {
+    std::string contains;       // matched case-insensitively against the title
+    std::string window_class;   // optional: only apply within this class
+    std::string profile;
+    std::string shortcut;
+};
+
 struct HyprConfig {
     bool enabled{false};
     std::string events_socket;
+    std::string window_source{"auto"};
     std::string default_profile;
+    std::vector<TitleRule> title_rules;
     
     std::unordered_map<std::string, std::string> class_to_profile;
     

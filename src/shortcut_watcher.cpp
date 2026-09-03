@@ -82,9 +82,10 @@ void ShortcutWatcher::stop() {
     closeDevices();
 }
 
-bool ShortcutWatcher::setActiveClass(const std::string& klass) {
+bool ShortcutWatcher::setActiveWindow(const std::string& window_class, const std::string& title) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    active_class_ = klass;
+    active_class_ = window_class;
+    active_title_ = title;
     updateActiveShortcutFromClass();
     
     // If we are NOT currently showing shortcuts, we might need to update the background profile immediately
@@ -179,9 +180,9 @@ void ShortcutWatcher::runLoop() {
 
 void ShortcutWatcher::updateActiveShortcutFromClass() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    std::string name;
-    auto it = hypr_.class_to_shortcut.find(active_class_);
-    if (it != hypr_.class_to_shortcut.end()) name = it->second;
+    // The runtime owns the class/title rules, so title-based shortcut
+    // selection and hot reload both work without duplicating them here.
+    std::string name = runtime_.shortcutForWindow(active_class_, active_title_);
     if (name.empty()) name = hypr_.default_shortcut;
     
     active_shortcut_name_ = name;
@@ -199,16 +200,7 @@ void ShortcutWatcher::updateActiveShortcutFromClass() {
 // rather than restoring a snapshot that may since have gone stale.
 void ShortcutWatcher::restoreActiveProfile() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    std::string prof = hypr_.default_profile;
-    auto pit = hypr_.class_to_profile.find(active_class_);
-    if (pit != hypr_.class_to_profile.end()) {
-        prof = pit->second;
-    }
-    if (!prof.empty()) {
-        runtime_.activateProfile(prof);
-    } else {
-        runtime_.setDrawList({});
-    }
+    runtime_.activateProfileForWindow(active_class_, active_title_);
 }
 
 void ShortcutWatcher::applyMaskForMods(int modmask) {

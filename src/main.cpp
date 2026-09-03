@@ -13,7 +13,6 @@
 #include "keyboard_configurator/shutdown_signal.hpp"
 
 #include "keyboard_configurator/doom_fire_preset.hpp"
-#include "keyboard_configurator/hyprland_watcher.hpp"
 #include "keyboard_configurator/key_activity_watcher.hpp"
 #include "keyboard_configurator/key_map_preset.hpp"
 #include "keyboard_configurator/liquid_plasma_preset.hpp"
@@ -21,6 +20,7 @@
 #include "keyboard_configurator/reaction_diffusion_preset.hpp"
 #include "keyboard_configurator/reactive_ripple_preset.hpp"
 #include "keyboard_configurator/shortcut_watcher.hpp"
+#include "keyboard_configurator/window_source.hpp"
 #include "keyboard_configurator/smoke_preset.hpp"
 #include "keyboard_configurator/snake_preset.hpp"
 #include "keyboard_configurator/space_colonization_preset.hpp"
@@ -97,26 +97,34 @@ int main(int argc, char** argv) {
             }
 
             std::unique_ptr<ShortcutWatcher> shortcuts;
-            std::unique_ptr<HyprlandWatcher> hypr;
+            std::unique_ptr<WindowSource> windows;
             if (runtime.hypr() && runtime.hypr()->enabled) {
                 const HyprConfig& hypr_config = *runtime.hypr();
                 if (hypr_config.shortcuts_overlay_preset_index >= 0) {
                     shortcuts = std::make_unique<ShortcutWatcher>(runtime.model(), runtime, hypr_config,
                                                                  runtime.model().keyCount());
                     shortcuts->start();
-                }
-                hypr = std::make_unique<HyprlandWatcher>(hypr_config.events_socket, runtime);
-                if (shortcuts) {
-                    hypr->setActiveClassCallback([watcher = shortcuts.get()](const std::string& klass) {
-                        return watcher->setActiveClass(klass);
-                    });
                     // A reload rebuilds the shortcut tables in place rather
                     // than restarting the evdev watcher.
                     runtime.setConfigObserver([watcher = shortcuts.get()](const HyprConfig& updated) {
                         watcher->reconfigure(updated);
                     });
                 }
-                hypr->start();
+
+                windows = createWindowSource(hypr_config.window_source, hypr_config.events_socket);
+                if (windows) {
+                    std::cout << "[Window] Using the " << windows->id() << " backend.\n";
+                    windows->start([&runtime, watcher = shortcuts.get()](const WindowInfo& info) {
+                        // The shortcut overlay gets first refusal: while a
+                        // modifier is held it owns the display, and swapping
+                        // the profile underneath it would flicker.
+                        const bool overlay_engaged =
+                            watcher != nullptr && watcher->setActiveWindow(info.window_class, info.title);
+                        if (!overlay_engaged) {
+                            runtime.activateProfileForWindow(info.window_class, info.title);
+                        }
+                    });
+                }
             }
 
             std::unique_ptr<ControlServer> control;
@@ -146,8 +154,8 @@ int main(int argc, char** argv) {
             if (key_watcher) {
                 key_watcher->stop();
             }
-            if (hypr) {
-                hypr->stop();
+            if (windows) {
+                windows->stop();
             }
             if (shortcuts) {
                 shortcuts->stop();

@@ -278,6 +278,8 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
     if (auto hypr_node = tbl["hypr"]) {
         HyprConfig hcfg;
         hcfg.enabled = hypr_node["enabled"].value_or(false);
+        hcfg.events_socket = hypr_node["events_socket"].value_or(std::string{});
+        hcfg.window_source = hypr_node["window_source"].value_or(std::string{"auto"});
         
         auto growProfileMasks = [&](std::size_t idx) {
             for (auto& [_, masks] : hcfg.profile_masks) {
@@ -307,6 +309,26 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         if (auto apps = tbl["apps"].as_table()) {
             hcfg.default_profile = (*apps)["default_profile"].value_or("default");
             hcfg.default_shortcut = (*apps)["default_shortcut"].value_or("default");
+            // [[apps.title_rules]] -- an ordered list, because "first match
+            // wins" needs an order and a TOML table has none.
+            if (auto rules = (*apps)["title_rules"].as_array()) {
+                for (auto& rule_node : *rules) {
+                    const toml::table* rule = rule_node.as_table();
+                    if (rule == nullptr) continue;
+                    TitleRule parsed;
+                    parsed.contains = (*rule)["contains"].value_or(std::string{});
+                    parsed.window_class = (*rule)["class"].value_or(std::string{});
+                    parsed.profile = (*rule)["profile"].value_or(std::string{});
+                    parsed.shortcut = (*rule)["shortcut"].value_or(std::string{});
+                    if (parsed.contains.empty() || (parsed.profile.empty() && parsed.shortcut.empty())) {
+                        std::cerr << "Warning: [[apps.title_rules]] entry needs 'contains' and a "
+                                     "'profile' or 'shortcut'; skipping.\n";
+                        continue;
+                    }
+                    hcfg.title_rules.push_back(std::move(parsed));
+                }
+            }
+
             if (auto maps = (*apps)["mappings"].as_table()) {
                  for (auto& [cls, prof] : *maps) {
                      // Check if it's a simple string or a table

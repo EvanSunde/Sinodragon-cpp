@@ -75,9 +75,14 @@ public:
     void setConfigObserver(std::function<void(const HyprConfig&)> observer);
 
     // --- Applied by the window and shortcut watchers ---
-    // Resolves a window class to its profile using the *current* config, so a
-    // reload takes effect on the next window switch with no other plumbing.
-    void activateProfileForWindow(const std::string& window_class);
+    // Resolves a focused window to its profile using the *current* config, so
+    // a reload takes effect on the next window switch with no other plumbing.
+    // Title rules are checked before class mappings.
+    void activateProfileForWindow(const std::string& window_class, const std::string& title = {});
+
+    // The shortcut set that should be active for this window, or empty.
+    [[nodiscard]] std::string shortcutForWindow(const std::string& window_class,
+                                                const std::string& title) const;
     void activateProfile(const std::string& profile);
     void setDrawList(const std::vector<std::size_t>& list);
     void applyPresetMasks(const std::vector<std::vector<bool>>& masks);

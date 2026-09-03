@@ -66,7 +66,11 @@ add_library(keyboard_configurator STATIC
     src/shutdown_signal.cpp
     src/config_loader.cpp
     src/configurator_cli.cpp
-    src/hyprland_watcher.cpp
+    src/window_source.cpp
+    src/window_source_hyprland.cpp
+    src/window_source_sway.cpp
+    src/window_source_x11.cpp
+    src/json_lite.cpp
     src/shortcut_watcher.cpp
     src/logging_transport.cpp
     src/hidapi_transport.cpp
@@ -111,6 +115,18 @@ target_link_libraries(sinoctl
 
 find_package(Threads REQUIRED)
 target_link_libraries(keyboard_configurator PUBLIC Threads::Threads)
+
+# Optional X11 window source. Wayland-only setups do not need it; without it
+# the x11 backend compiles to a stub that reports itself unavailable.
+find_package(X11 QUIET)
+if(X11_FOUND)
+    target_compile_definitions(keyboard_configurator PRIVATE SINODRAGON_HAVE_X11)
+    target_link_libraries(keyboard_configurator PUBLIC ${X11_LIBRARIES})
+    target_include_directories(keyboard_configurator PRIVATE ${X11_INCLUDE_DIR})
+    message(STATUS "X11 window source: enabled")
+else()
+    message(STATUS "X11 window source: disabled (libX11 not found)")
+endif()
 
 # --- Install ---
 include(GNUInstallDirs)
