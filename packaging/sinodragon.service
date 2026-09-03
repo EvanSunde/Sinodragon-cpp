@@ -6,7 +6,7 @@
 #   systemctl --user enable --now sinodragon
 #
 # The daemon needs read access to /dev/hidrawN and /dev/input/event*; install
-# packaging/99-sinodragon.rules first or it will start and find no device.
+# packaging/70-sinodragon.rules first or it will start and find no device.
 
 [Unit]
 Description=Sinodragon keyboard RGB daemon

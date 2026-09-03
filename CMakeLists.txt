@@ -140,7 +140,7 @@ endif()
 # --- Install ---
 include(GNUInstallDirs)
 install(TARGETS sinodragon sinoctl RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES packaging/99-sinodragon.rules
+install(FILES packaging/70-sinodragon.rules
         DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/udev/rules.d)
 install(FILES packaging/sinodragon.service
         DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/user)

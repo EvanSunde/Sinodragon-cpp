@@ -134,14 +134,15 @@ int main(int argc, char** argv) {
                 if (windows) {
                     std::cout << "[Window] Using the " << windows->id() << " backend.\n";
                     windows->start([&runtime, watcher = shortcuts.get()](const WindowInfo& info) {
-                        // The shortcut overlay gets first refusal: while a
-                        // modifier is held it owns the display, and swapping
-                        // the profile underneath it would flicker.
-                        const bool overlay_engaged =
-                            watcher != nullptr && watcher->setActiveWindow(info.window_class, info.title);
-                        if (!overlay_engaged) {
-                            runtime.activateProfileForWindow(info.window_class, info.title);
+                        // Always update the base profile. While a modifier is
+                        // held the runtime stores it under the overlay instead
+                        // of showing it, and reveals it on release -- so the
+                        // profile is always correct without the flicker of
+                        // swapping it live beneath the overlay.
+                        if (watcher != nullptr) {
+                            watcher->setActiveWindow(info.window_class, info.title);
                         }
+                        runtime.activateProfileForWindow(info.window_class, info.title);
                     });
                 }
             }
