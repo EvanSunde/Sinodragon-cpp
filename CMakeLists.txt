@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.16)
 project(keyboard_configurator LANGUAGES CXX)
 
 # --- Dependencies ---
-find_package(hidapi REQUIRED)
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
     pkg_check_modules(LIBEVDEV REQUIRED IMPORTED_TARGET libevdev)
@@ -11,14 +10,29 @@ endif()
 # 1. FIND TOML++ (System Package)
 find_package(tomlplusplus CONFIG REQUIRED)
 
-# Determine HIDAPI target
+# 2. FIND HIDAPI
+# Arch and vcpkg ship a CMake config package; Debian/Ubuntu only ship pkg-config
+# files, so fall back to those rather than hard-failing.
+find_package(hidapi QUIET)
 set(HIDAPI_TARGET "")
 if(TARGET hidapi::hidapi)
     set(HIDAPI_TARGET hidapi::hidapi)
 elseif(TARGET hidapi::hidapi-hidraw)
     set(HIDAPI_TARGET hidapi::hidapi-hidraw)
-else()
-    message(FATAL_ERROR "hidapi target not found.")
+elseif(PkgConfig_FOUND)
+    pkg_check_modules(HIDAPI QUIET IMPORTED_TARGET hidapi-hidraw)
+    if(NOT TARGET PkgConfig::HIDAPI)
+        pkg_check_modules(HIDAPI QUIET IMPORTED_TARGET hidapi-libusb)
+    endif()
+    if(NOT TARGET PkgConfig::HIDAPI)
+        pkg_check_modules(HIDAPI QUIET IMPORTED_TARGET hidapi)
+    endif()
+    if(TARGET PkgConfig::HIDAPI)
+        set(HIDAPI_TARGET PkgConfig::HIDAPI)
+    endif()
+endif()
+if(HIDAPI_TARGET STREQUAL "")
+    message(FATAL_ERROR "hidapi not found (looked for a CMake config package and for the hidapi-hidraw/hidapi-libusb/hidapi pkg-config modules).")
 endif()
 
 # --- Compiler Settings ---
