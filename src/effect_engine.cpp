@@ -44,6 +44,7 @@ void EffectEngine::setPresets(std::vector<std::unique_ptr<LightingPreset>> prese
     layer_frame_.resize(model_.keyCount());
 
     applyKeyActivityProvider();
+    applySystemState();
 }
 
 void EffectEngine::setPresets(std::vector<std::unique_ptr<LightingPreset>> presets,
@@ -67,6 +68,11 @@ void EffectEngine::setDrawList(std::vector<std::size_t> draw_list) {
 void EffectEngine::setKeyActivityProvider(KeyActivityProviderPtr provider) {
     key_activity_provider_ = std::move(provider);
     applyKeyActivityProvider();
+}
+
+void EffectEngine::setSystemState(SystemStatePtr state) {
+    system_state_ = std::move(state);
+    applySystemState();
 }
 
 void EffectEngine::renderFrame(double time_seconds) {
@@ -228,6 +234,14 @@ LayerStyle EffectEngine::layerStyle(std::size_t index) const {
         return preset_styles_[index];
     }
     return LayerStyle{};
+}
+
+void EffectEngine::applySystemState() {
+    for (auto& preset : presets_) {
+        if (preset) {
+            preset->setSystemState(system_state_);
+        }
+    }
 }
 
 void EffectEngine::applyKeyActivityProvider() {

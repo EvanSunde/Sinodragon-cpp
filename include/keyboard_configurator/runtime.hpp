@@ -14,6 +14,7 @@
 #include "keyboard_configurator/effect_engine.hpp"
 #include "keyboard_configurator/key_activity.hpp"
 #include "keyboard_configurator/keyboard_model.hpp"
+#include "keyboard_configurator/system_state.hpp"
 
 namespace kb::cfg {
 
@@ -55,6 +56,7 @@ public:
 
     [[nodiscard]] const KeyboardModel& model() const noexcept { return model_; }
     [[nodiscard]] KeyActivityProviderPtr keyActivity() const noexcept { return key_activity_; }
+    [[nodiscard]] SystemStatePtr systemState() const noexcept { return system_state_; }
     [[nodiscard]] const std::optional<HyprConfig>& hypr() const noexcept { return hypr_; }
     [[nodiscard]] std::size_t presetCount() const;
     [[nodiscard]] bool shouldQuit() const noexcept { return quit_requested_.load(); }
@@ -113,6 +115,8 @@ private:
     std::string cmdWatch(const std::string& arg);
     std::string cmdBrightness(const std::string& arg);
     std::string cmdReload();
+    std::string cmdMetric(const std::string& args);
+    std::string cmdState(const std::string& args);
     std::string cmdGame(const std::string& args);
     std::string listGames();
 
@@ -131,6 +135,7 @@ private:
     const ConfigLoader& loader_;
     EffectEngine engine_;
     KeyActivityProviderPtr key_activity_;
+    SystemStatePtr system_state_;
 
     std::string config_path_;
     std::vector<ParameterMap> preset_parameters_;

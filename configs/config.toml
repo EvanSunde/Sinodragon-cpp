@@ -463,6 +463,52 @@
       density = 0.3
       type = "life"
 
+  # System monitors. CPU across the function row, memory across the numbers,
+  # battery on the top row (drops out on desktops, which have no battery).
+  [profiles.sysmon]
+
+    [[profiles.sysmon.layers]]
+      type = "static_color"
+      color = "#050510"
+
+    [[profiles.sysmon.layers]]
+      type = "system_meter"
+      metric = "cpu"
+      bar_keys = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]
+      blend = "add"
+
+    [[profiles.sysmon.layers]]
+      type = "system_meter"
+      metric = "memory"
+      bar_keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+      color_low = "#0090FF"
+      color_mid = "#00D0D0"
+      color_high = "#FF4090"
+      blend = "add"
+
+    [[profiles.sysmon.layers]]
+      type = "system_meter"
+      metric = "battery"
+      bar_keys = ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"]
+      blend = "add"
+
+  # Driven from outside: `sinoctl state build busy|ok|fail` from a CI script,
+  # a git hook, or a notification bridge.
+  [profiles.buildstatus]
+
+    [[profiles.buildstatus.layers]]
+      type = "liquid_plasma"
+      speed = 0.2
+      scale = 2.0
+      colors = ["#000000", "#0a0a18", "#101028"]
+
+    [[profiles.buildstatus.layers]]
+      type = "status_light"
+      signal = "build"
+      keys = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]
+      ok_timeout = 20.0
+      blend = "screen"
+
   # Not a game -- a layer. Stack it over a dim base to see where you type.
   [profiles.heatmap]
 

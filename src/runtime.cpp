@@ -57,6 +57,7 @@ Runtime::Runtime(RuntimeConfig config, std::string config_path, const ConfigLoad
       loader_(loader),
       engine_(model_, *transport_),
       key_activity_(std::make_shared<KeyActivityProvider>(model_.keyCount())),
+      system_state_(std::make_shared<SystemState>()),
       config_path_(std::move(config_path)),
       preset_parameters_(std::move(config.preset_parameters)),
       hypr_(std::move(config.hypr)) {
@@ -65,6 +66,7 @@ Runtime::Runtime(RuntimeConfig config, std::string config_path, const ConfigLoad
     watch_config_on_start_ = config.config_watch_mode;
 
     engine_.setKeyActivityProvider(key_activity_);
+    engine_.setSystemState(system_state_);
     engine_.setPresets(std::move(config.presets), std::move(config.preset_masks));
     engine_.setLayerStyles(std::move(config.preset_styles));
     for (std::size_t i = 0; i < config.preset_enabled.size(); ++i) {
@@ -409,6 +411,10 @@ std::string Runtime::reload() {
 
         engine_.setPresets(std::move(fresh.presets), std::move(fresh.preset_masks));
         engine_.setLayerStyles(std::move(fresh.preset_styles));
+        // setPresets rebuilds the preset list, so the shared providers have to
+        // be handed to the new instances.
+        engine_.setKeyActivityProvider(key_activity_);
+        engine_.setSystemState(system_state_);
         for (std::size_t i = 0; i < fresh.preset_enabled.size(); ++i) {
             engine_.setPresetEnabled(i, fresh.preset_enabled[i]);
         }
@@ -480,6 +486,8 @@ std::string Runtime::execute(const std::string& line) {
                "  game list                 list configured games\n"
                "  game <name> <start|stop>  run a game (snake, tetris, pong, life)\n"
                "  reload                    re-read the config file in place\n"
+               "  metric <name> <0..1>      feed a value to a system_meter layer\n"
+               "  state <name> <value>      set a status_light state (ok/warn/fail/busy/off)\n"
                "  watch <on|off>            watch the config file for changes\n"
                "  quit                      shut the daemon down";
     }
@@ -509,6 +517,12 @@ std::string Runtime::execute(const std::string& line) {
     }
     if (cmd == "reload") {
         return cmdReload();
+    }
+    if (cmd == "metric") {
+        return cmdMetric(args);
+    }
+    if (cmd == "state") {
+        return cmdState(args);
     }
     if (cmd == "game") {
         return cmdGame(args);
@@ -662,6 +676,36 @@ std::string Runtime::cmdFrame(const std::string& arg) {
     frame_interval_ms_.store(static_cast<int>(interval));
     wake();
     return "Frame interval set to " + arg + " ms";
+}
+
+std::string Runtime::cmdMetric(const std::string& args) {
+    const auto [name, value_text] = splitCommand(args);
+    if (name.empty() || value_text.empty()) {
+        return "Usage: metric <name> <0..1>";
+    }
+    double value = 0.0;
+    try {
+        std::size_t consumed = 0;
+        value = std::stod(value_text, &consumed);
+        if (consumed != value_text.size()) {
+            return "Invalid value '" + value_text + "'; expected a number from 0 to 1";
+        }
+    } catch (...) {
+        return "Invalid value '" + value_text + "'; expected a number from 0 to 1";
+    }
+    system_state_->setMetric(name, value);
+    wake();
+    return "Metric " + name + " = " + value_text;
+}
+
+std::string Runtime::cmdState(const std::string& args) {
+    const auto [name, value] = splitCommand(args);
+    if (name.empty() || value.empty()) {
+        return "Usage: state <name> <ok|warn|fail|busy|off>";
+    }
+    system_state_->setState(name, value);
+    wake();
+    return "State " + name + " = " + value;
 }
 
 std::string Runtime::cmdReload() {

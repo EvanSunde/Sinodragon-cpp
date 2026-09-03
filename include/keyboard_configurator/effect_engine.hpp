@@ -28,6 +28,7 @@ public:
     [[nodiscard]] std::size_t presetCount() const { return presets_.size(); }
 
     void setKeyActivityProvider(KeyActivityProviderPtr provider);
+    void setSystemState(SystemStatePtr state);
 
     // Legacy methods
     void setPresetEnabled(std::size_t index, bool enabled);
@@ -54,6 +55,7 @@ public:
 
 private:
     void applyKeyActivityProvider();
+    void applySystemState();
 
     const KeyboardModel& model_;
     DeviceTransport& transport_;
@@ -72,6 +74,7 @@ private:
     std::vector<std::vector<bool>> preset_masks_;
     std::vector<LayerStyle> preset_styles_;
     KeyActivityProviderPtr key_activity_provider_;
+    SystemStatePtr system_state_;
 
     // Scratch buffer for the layer currently being composited. Kept as a
     // member so a frame costs no allocations.

@@ -64,6 +64,9 @@ add_library(keyboard_configurator STATIC
     src/pong_preset.cpp
     src/life_preset.cpp
     src/typing_heatmap_preset.cpp
+    src/system_state.cpp
+    src/system_meter_preset.cpp
+    src/status_light_preset.cpp
     src/effect_engine.cpp
     src/runtime.cpp
     src/app_options.cpp

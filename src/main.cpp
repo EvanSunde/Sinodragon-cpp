@@ -30,6 +30,8 @@
 #include "keyboard_configurator/space_colonization_preset.hpp"
 #include "keyboard_configurator/star_matrix_preset.hpp"
 #include "keyboard_configurator/static_color_preset.hpp"
+#include "keyboard_configurator/status_light_preset.hpp"
+#include "keyboard_configurator/system_meter_preset.hpp"
 
 using namespace kb::cfg;
 
@@ -54,6 +56,8 @@ PresetRegistry buildRegistry() {
     registry.registerPreset("pong", [] { return std::make_unique<PongPreset>(); });
     registry.registerPreset("life", [] { return std::make_unique<LifePreset>(); });
     registry.registerPreset("typing_heatmap", [] { return std::make_unique<TypingHeatmapPreset>(); });
+    registry.registerPreset("system_meter", [] { return std::make_unique<SystemMeterPreset>(); });
+    registry.registerPreset("status_light", [] { return std::make_unique<StatusLightPreset>(); });
     return registry;
 }
 
