@@ -67,6 +67,10 @@ add_library(sinodragon_core STATIC
     src/system_state.cpp
     src/system_meter_preset.cpp
     src/status_light_preset.cpp
+    src/matrix_rain_preset.cpp
+    src/pomodoro_preset.cpp
+    src/lightning_preset.cpp
+    src/fireworks_preset.cpp
     src/effect_engine.cpp
     src/runtime.cpp
     src/app_options.cpp

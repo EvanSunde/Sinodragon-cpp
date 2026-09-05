@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace kb::cfg {
 
@@ -36,6 +37,22 @@ struct LayerStyle {
 
 // Mixes towards `above` by `amount` (0 keeps `below`, 1 takes `above`).
 [[nodiscard]] RgbColor mixColors(RgbColor below, RgbColor above, double amount);
+
+// Shared parsing helpers. Deliberately in their own namespace: several presets
+// already carry a private parseHexColor, and this must not collide with them.
+namespace color {
+
+// "#RRGGBB" -> colour, returning `fallback` for anything malformed.
+[[nodiscard]] RgbColor hex(const std::string& value, RgbColor fallback = {0, 0, 0});
+
+// Splits a comma-separated list, trimming each element and dropping empties.
+[[nodiscard]] std::vector<std::string> splitList(const std::string& text);
+
+// A comma-separated list of "#RRGGBB". Empty when nothing valid was found, so
+// the caller can keep its default palette.
+[[nodiscard]] std::vector<RgbColor> palette(const std::string& text);
+
+}  // namespace color
 
 inline bool operator==(const RgbColor& lhs, const RgbColor& rhs) {
     return lhs.r == rhs.r && lhs.g == rhs.g && lhs.b == rhs.b;

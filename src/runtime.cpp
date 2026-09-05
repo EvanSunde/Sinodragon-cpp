@@ -9,6 +9,7 @@
 #include "keyboard_configurator/config_watcher.hpp"
 #include "keyboard_configurator/retry_helper.hpp"
 #include "keyboard_configurator/game_preset.hpp"
+#include "keyboard_configurator/pomodoro_preset.hpp"
 
 namespace kb::cfg {
 
@@ -528,6 +529,7 @@ std::string Runtime::execute(const std::string& line) {
                "  brightness [0-100]        get or set master brightness\n"
                "  game list                 list configured games\n"
                "  game <name> <start|stop>  run a game (snake, tetris, pong, life)\n"
+               "  pomodoro <start|pause|reset|skip|status>\n"
                "  reload                    re-read the config file in place\n"
                "  metric <name> <0..1>      feed a value to a system_meter layer\n"
                "  state <name> <value>      set a status_light state (ok/warn/fail/busy/off)\n"
@@ -572,6 +574,9 @@ std::string Runtime::execute(const std::string& line) {
     }
     if (cmd == "complete") {
         return cmdComplete(args);
+    }
+    if (cmd == "pomodoro") {
+        return cmdPomodoro(args);
     }
     if (cmd == "snake") {
         // Kept as an alias; `game snake start` is the general form.
@@ -872,7 +877,7 @@ std::string Runtime::cmdComplete(const std::string& args) {
         static const char* kCommands[] = {
             "help",  "status", "list",   "profiles", "profile", "brightness", "frame",
             "set",   "toggle", "game",   "metric",   "state",   "reload",     "watch",
-            "quit",  "complete",
+            "quit",  "complete", "pomodoro",
         };
         for (const char* command : kCommands) {
             out << command << '\n';
@@ -881,6 +886,45 @@ std::string Runtime::cmdComplete(const std::string& args) {
     }
 
     return "Usage: complete <commands|profiles|games>";
+}
+
+// A timer needs commands, not just config, so it gets its own verb rather
+// than being driven through `set`.
+std::string Runtime::cmdPomodoro(const std::string& args) {
+    const auto [action, ignored] = splitCommand(args);
+    (void)ignored;
+
+    std::lock_guard<std::mutex> guard(engine_mutex_);
+
+    PomodoroPreset* timer = nullptr;
+    for (std::size_t i = 0; i < engine_.presetCount(); ++i) {
+        if (auto* candidate = dynamic_cast<PomodoroPreset*>(&engine_.presetAt(i))) {
+            timer = candidate;
+            break;
+        }
+    }
+    if (timer == nullptr) {
+        return "No pomodoro preset configured. Add a profile layer with type = \"pomodoro\".";
+    }
+
+    if (action.empty() || action == "status") {
+        return timer->statusLine();
+    }
+    if (action == "start" || action == "resume") {
+        timer->start();
+    } else if (action == "pause" || action == "stop") {
+        timer->pause();
+    } else if (action == "reset") {
+        timer->reset();
+    } else if (action == "skip" || action == "next") {
+        timer->skip();
+    } else {
+        return "Usage: pomodoro <start|pause|reset|skip|status>";
+    }
+
+    dirty_.store(true);
+    loop_cv_.notify_all();
+    return timer->statusLine();
 }
 
 std::string Runtime::listGames() {

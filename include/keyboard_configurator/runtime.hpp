@@ -137,6 +137,7 @@ private:
     std::string cmdState(const std::string& args);
     std::string cmdGame(const std::string& args);
     std::string cmdComplete(const std::string& args);
+    std::string cmdPomodoro(const std::string& args);
     std::string listGames();
 
     // A running game owns the whole keyboard; these save and restore the

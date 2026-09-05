@@ -515,6 +515,62 @@
       ok_timeout = 20.0
       blend = "screen"
 
+  # Classic falling code. direction = "right" turns it into a ticker.
+  [profiles.rain]
+
+    [[profiles.rain.layers]]
+      type = "matrix_rain"
+      speed = 7.0
+      density = 0.6
+      tail = 3.0
+      color_head = "#CCFFCC"
+      color_tail = "#00FF46"
+      background = "#000800"
+
+  # Bolts crack out from whatever key you press.
+  [profiles.storm]
+
+    [[profiles.storm.layers]]
+      type = "smoke"
+      speed = 0.15
+      scale = 2.0
+      color_low = "#000006"
+      color_high = "#101830"
+
+    [[profiles.storm.layers]]
+      type = "lightning"
+      decay = 0.55
+      branch_chance = 0.35
+      max_length = 10
+      ambient_interval = 6.0
+      blend = "screen"
+
+  # Press a key, a shell rises to it and bursts.
+  [profiles.fireworks]
+
+    [[profiles.fireworks.layers]]
+      type = "fireworks"
+      gravity = 9.0
+      sparks = 14
+      burst_speed = 5.0
+      launch_speed = 9.0
+
+  # A visible timer. Drive it with: sinoctl pomodoro start|pause|reset|skip
+  [profiles.focus]
+
+    [[profiles.focus.layers]]
+      type = "static_color"
+      color = "#050505"
+
+    [[profiles.focus.layers]]
+      type = "pomodoro"
+      work_minutes = 25
+      short_break_minutes = 5
+      long_break_minutes = 15
+      rounds_before_long_break = 4
+      bar_keys = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]
+      blend = "add"
+
   # Not a game -- a layer. Stack it over a dim base to see where you type.
   [profiles.heatmap]
 

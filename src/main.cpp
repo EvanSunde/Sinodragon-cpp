@@ -33,6 +33,10 @@
 #include "keyboard_configurator/static_color_preset.hpp"
 #include "keyboard_configurator/status_light_preset.hpp"
 #include "keyboard_configurator/system_meter_preset.hpp"
+#include "keyboard_configurator/matrix_rain_preset.hpp"
+#include "keyboard_configurator/pomodoro_preset.hpp"
+#include "keyboard_configurator/lightning_preset.hpp"
+#include "keyboard_configurator/fireworks_preset.hpp"
 
 using namespace kb::cfg;
 
@@ -59,6 +63,10 @@ PresetRegistry buildRegistry() {
     registry.registerPreset("typing_heatmap", [] { return std::make_unique<TypingHeatmapPreset>(); });
     registry.registerPreset("system_meter", [] { return std::make_unique<SystemMeterPreset>(); });
     registry.registerPreset("status_light", [] { return std::make_unique<StatusLightPreset>(); });
+    registry.registerPreset("matrix_rain", [] { return std::make_unique<MatrixRainPreset>(); });
+    registry.registerPreset("pomodoro", [] { return std::make_unique<PomodoroPreset>(); });
+    registry.registerPreset("lightning", [] { return std::make_unique<LightningPreset>(); });
+    registry.registerPreset("fireworks", [] { return std::make_unique<FireworksPreset>(); });
     return registry;
 }
 
