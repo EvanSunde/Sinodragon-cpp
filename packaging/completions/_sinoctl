@@ -47,6 +47,7 @@ _sinoctl_main() {
         watch)   _values 'watch' 'on' 'off' ;;
         brightness) _values 'brightness' '0' '25' '50' '75' '100' ;;
         complete)   _values 'what' 'commands' 'profiles' 'games' ;;
+        pomodoro)   _values 'action' 'start' 'pause' 'reset' 'skip' 'status' ;;
       esac ;;
   esac
 }

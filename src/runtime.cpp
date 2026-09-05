@@ -528,7 +528,7 @@ std::string Runtime::execute(const std::string& line) {
                "  frame <ms>                animation frame interval\n"
                "  brightness [0-100]        get or set master brightness\n"
                "  game list                 list configured games\n"
-               "  game <name> <start|stop>  run a game (snake, tetris, pong, life)\n"
+               "  game <name> <start|stop>  run a game, from those `game list` shows\n"
                "  pomodoro <start|pause|reset|skip|status>\n"
                "  reload                    re-read the config file in place\n"
                "  metric <name> <0..1>      feed a value to a system_meter layer\n"

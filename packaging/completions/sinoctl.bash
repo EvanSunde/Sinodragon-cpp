@@ -69,6 +69,9 @@ _sinoctl() {
         complete)
             (( argno == 1 )) && COMPREPLY=( $(compgen -W "commands profiles games" -- "$cur") )
             ;;
+        pomodoro)
+            (( argno == 1 )) && COMPREPLY=( $(compgen -W "start pause reset skip status" -- "$cur") )
+            ;;
         -s|--socket)
             _filedir 2>/dev/null
             ;;

@@ -126,6 +126,60 @@ This document describes the various effects and the configuration options availa
         - palette (Comma-separated hex codes): Cold to hot. Defaults to blue through cyan and yellow to white.
         - color_cold (Hex color code): Colour for keys with no heat at all.
 
+### matrix_rain
+
+    - Description: Columns of glowing characters falling down the board, with a bright head and a fading tail. The keyboard is much wider than it is tall, so `direction = "right"` (rain running along the long axis) usually reads better than the traditional downward fall.
+    - Options:
+        - direction (String): "down" (default), "right" or "left". "horizontal" is an alias for "right".
+        - speed (Float): Cells per second a drop travels. Default 6.
+        - speed_variance (Float, 0.0 to 1.0): How much individual lanes differ from that speed. Default 0.5.
+        - density (Float, 0.0 to 1.0): Fraction of lanes raining at any moment. Default 0.6.
+        - tail (Float): Trail length in cells. Default 3.
+        - color_head (Hex color code): The leading cell.
+        - color_tail (Hex color code): The trail, which fades into the background.
+        - background (Hex color code): Unlit cells.
+
+### lightning
+
+    - Description: Key-reactive. A keystroke fires a forked bolt outward from the key you pressed, which flickers and fades. Quiet the rest of the time unless you give it an ambient interval.
+    - Options:
+        - branch_chance (Float, 0.0 to 1.0): Chance a bolt splits at each step. Default 0.35.
+        - max_length (Integer): How far a bolt travels, in cells. Default 10.
+        - max_bolts (Integer): Bolts alive at once; older ones are dropped. Default 6.
+        - decay (Float): Seconds for a bolt to fade out.
+        - flicker (Float, 0.0 to 1.0): How much the bolt's brightness jitters. Default 0.35.
+        - ambient_interval (Float): Seconds between self-fired bolts when nobody is typing. 0 (the default) means it only reacts.
+        - color_core (Hex color code): The bolt itself.
+        - color_glow (Hex color code): The halo around it.
+        - background (Hex color code).
+
+### fireworks
+
+    - Description: Key-reactive. Each keystroke launches a shell that rises and bursts into sparks, which arc under gravity and fade. With `launch_from_bottom = false` the burst happens at the key you pressed instead.
+    - Options:
+        - launch_from_bottom (Boolean): Launch from the bottom row up to the pressed key's height (default), or burst straight at the key.
+        - sparks (Integer): Sparks per burst. Default 14.
+        - burst_speed (Float): How fast sparks fly out.
+        - launch_speed (Float): How fast the shell rises.
+        - gravity (Float): Downward pull on the sparks.
+        - spark_life (Float): Seconds a spark lasts. Default 1.1.
+        - palette (Comma-separated hex codes): Burst colours, picked per shell.
+        - background (Hex color code).
+
+### pomodoro
+
+    - Description: A work/break timer on the keyboard. A run of keys fills as the phase burns down -- red while working, blue on a short break, green on a long one -- and flashes when a phase ends. Driven from the control socket with `sinoctl pomodoro <start|pause|reset|skip|status>`, so it is a layer you leave in a profile rather than something you start and stop.
+    - Options:
+        - work_minutes (Float): Default 25.
+        - short_break_minutes (Float): Default 5.
+        - long_break_minutes (Float): Default 15.
+        - rounds_before_long_break (Integer): Default 4.
+        - bar_keys (Array of key labels): The keys the countdown fills, in order. Without it the whole board is used.
+        - flash_seconds (Float): How long the end-of-phase flash lasts. Default 6.
+        - color_work, color_short_break, color_long_break (Hex color codes): The bar in each phase.
+        - color_spent (Hex color code): Time already used up.
+        - color_paused (Hex color code): Shown while the timer is paused.
+
 ### system_meter
 
     - Description: Draws a value as a bar across a named run of keys.
@@ -150,11 +204,17 @@ This document describes the various effects and the configuration options availa
         - style_<state> (String): solid, pulse or sweep.
         - color_off (Hex color code): Shown when the state is unset or "off".
 
-### Games: snake, tetris, pong, life
+### Games
 
     - Description: Take the whole keyboard over while running. Start and stop them with `sinoctl game <name> start|stop`; declare one as a layer in its own profile to make it available. All of them need the keycodes CSV, which is how they read input.
+    - Note on shape: the board is six rows tall and sixteen wide. Games that would normally be tall are turned sideways to suit it -- tetris drops along the long axis and clears a full *column*, and connect4 centres its 7x6 grid rather than stretching it.
     - Options:
-        - snake: step_interval (Float) -- seconds per move.
-        - tetris: step_interval (Float), background, palette (Comma-separated hex codes).
+        - snake: step_interval (Float) -- seconds per move. Arrows steer; Enter or Space restarts after a crash.
+        - tetris: step_interval (Float), background, palette (Comma-separated hex codes). Up/Down move, Space rotates, Left hard-drops.
         - pong: two players by default -- left paddle W/S, right paddle Up/Down. ball_speed, paddle_height (Floats); win_score (Integer, default 7); left_up, left_down, right_up, right_down (key labels); opponent ("human" default, or "ai"/"cpu" for a computer right-hand player, which then uses ai_speed); color_left, color_right, color_ball, background (color_player/color_ai still accepted).
         - life: step_interval (Float), density (Float, 0.0 to 1.0 seeding density); color_alive, color_new, background.
+        - connect4: two players dropping discs into a centred 7x6 grid; the next free slot pulses in the current player's colour and a win flashes the winning line. column_keys (Array of key labels, default 1-7), reset_key (key label, default Enter), restart_after (Float, seconds before a finished game clears; default 6); color_one, color_two, color_empty.
+        - breakout: bricks up top, paddle along the bottom row. Left/Right move and Space serves; the ball rides the paddle until served, and hitting off-centre angles the bounce. brick_rows (Integer, default 2), lives (Integer, default 3), ball_speed, paddle_width (Floats), restart_after (Float); left_key, right_key, serve_key (key labels); brick_palette (Comma-separated hex codes, one per row), color_paddle, color_ball, background.
+        - flappy: the bird holds a column near the left while walls scroll in from the right. *Any* key flaps -- it is a one-button game, so no key hunting. gravity, flap (Floats; flap is negative, an upward kick), scroll (Float, cells per second), spawn_interval (Float), gap (Integer, gap height in cells, default 3), restart_after (Float); color_bird, color_wall, color_dead, background.
+        - simon: a lengthening sequence flashes on four pads and you repeat it. Pads glow faintly between rounds so you can find them, and a pad whose key is missing from the layout is dropped at startup. pads (Array of key labels, default A/S/D/F), pad_colors (Comma-separated hex codes, one per pad), step_seconds, gap_seconds, result_seconds (Floats), idle_level (Float, 0.0 to 1.0, how brightly a resting pad glows), background.
+        - reaction: after a random wait one key lights and you hit it as fast as you can; the time shows as a bar running green to red, your best stays dim on the row above, and pressing early is a false start. min_wait, max_wait (Floats, the random delay, default 1.5 to 5), slow_seconds (Float, the time that counts as fully slow), result_seconds (Float); color_target, color_fast, color_slow, color_false_start, background.

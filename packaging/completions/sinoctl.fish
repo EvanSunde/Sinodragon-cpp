@@ -45,6 +45,7 @@ complete -c sinoctl -n "__sinoctl_using state" -a "ok warn fail busy off"
 complete -c sinoctl -n "__sinoctl_using watch" -a "on off"
 complete -c sinoctl -n "__sinoctl_using brightness" -a "0 25 50 75 100"
 complete -c sinoctl -n "__sinoctl_using complete" -a "commands profiles games"
+complete -c sinoctl -n "__sinoctl_using pomodoro" -a "start pause reset skip status"
 
 complete -c sinodragon -s c -l config -r -F -d "Config file"
 complete -c sinodragon -s d -l daemon -d "Run without the interactive prompt"
