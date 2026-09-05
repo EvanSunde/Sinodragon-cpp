@@ -33,6 +33,15 @@
 #include "keyboard_configurator/static_color_preset.hpp"
 #include "keyboard_configurator/status_light_preset.hpp"
 #include "keyboard_configurator/system_meter_preset.hpp"
+#include "keyboard_configurator/matrix_rain_preset.hpp"
+#include "keyboard_configurator/pomodoro_preset.hpp"
+#include "keyboard_configurator/lightning_preset.hpp"
+#include "keyboard_configurator/fireworks_preset.hpp"
+#include "keyboard_configurator/connect_four_preset.hpp"
+#include "keyboard_configurator/breakout_preset.hpp"
+#include "keyboard_configurator/flappy_preset.hpp"
+#include "keyboard_configurator/simon_preset.hpp"
+#include "keyboard_configurator/reaction_preset.hpp"
 
 using namespace kb::cfg;
 
@@ -59,6 +68,15 @@ PresetRegistry buildRegistry() {
     registry.registerPreset("typing_heatmap", [] { return std::make_unique<TypingHeatmapPreset>(); });
     registry.registerPreset("system_meter", [] { return std::make_unique<SystemMeterPreset>(); });
     registry.registerPreset("status_light", [] { return std::make_unique<StatusLightPreset>(); });
+    registry.registerPreset("matrix_rain", [] { return std::make_unique<MatrixRainPreset>(); });
+    registry.registerPreset("pomodoro", [] { return std::make_unique<PomodoroPreset>(); });
+    registry.registerPreset("lightning", [] { return std::make_unique<LightningPreset>(); });
+    registry.registerPreset("fireworks", [] { return std::make_unique<FireworksPreset>(); });
+    registry.registerPreset("connect4", [] { return std::make_unique<ConnectFourPreset>(); });
+    registry.registerPreset("breakout", [] { return std::make_unique<BreakoutPreset>(); });
+    registry.registerPreset("flappy", [] { return std::make_unique<FlappyPreset>(); });
+    registry.registerPreset("simon", [] { return std::make_unique<SimonPreset>(); });
+    registry.registerPreset("reaction", [] { return std::make_unique<ReactionPreset>(); });
     return registry;
 }
 

@@ -122,7 +122,11 @@ private:
     std::string describePresets();
     std::string describeProfiles();
 
-    std::string cmdProfile(const std::string& arg);
+    std::string cmdProfile(const std::string& args);
+
+    // Reverts a `profile <name> for <duration>` hold once it expires. Called
+    // from the render loop, which already ticks often enough.
+    void expireTemporaryProfileIfDue();
     std::string cmdToggle(const std::string& arg);
     std::string cmdSet(const std::string& args);
     std::string cmdFrame(const std::string& arg);
@@ -132,6 +136,8 @@ private:
     std::string cmdMetric(const std::string& args);
     std::string cmdState(const std::string& args);
     std::string cmdGame(const std::string& args);
+    std::string cmdComplete(const std::string& args);
+    std::string cmdPomodoro(const std::string& args);
     std::string listGames();
 
     // A running game owns the whole keyboard; these save and restore the
@@ -191,6 +197,12 @@ private:
 
     // Current composition, so overrides can be undone.
     std::string active_profile_;
+
+    // `profile <name> for 30s`: hold this profile, ignore window-driven
+    // switches (they only update where we revert to), then go back.
+    bool temporary_profile_active_{false};
+    std::string revert_profile_;
+    std::chrono::steady_clock::time_point temporary_profile_expiry_{};
     std::vector<std::size_t> current_draw_list_;
     std::vector<std::vector<bool>> current_masks_;
 

@@ -14,6 +14,60 @@ inline std::uint8_t clamp8(int value) {
 
 }  // namespace
 
+namespace color {
+
+RgbColor hex(const std::string& value, RgbColor fallback) {
+    if (value.size() != 7 || value.front() != '#') {
+        return fallback;
+    }
+    const auto digit = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+        return -1;
+    };
+    int nibbles[6];
+    for (int i = 0; i < 6; ++i) {
+        nibbles[i] = digit(value[static_cast<std::size_t>(i) + 1]);
+        if (nibbles[i] < 0) {
+            return fallback;
+        }
+    }
+    return {static_cast<std::uint8_t>((nibbles[0] << 4) | nibbles[1]),
+            static_cast<std::uint8_t>((nibbles[2] << 4) | nibbles[3]),
+            static_cast<std::uint8_t>((nibbles[4] << 4) | nibbles[5])};
+}
+
+std::vector<std::string> splitList(const std::string& text) {
+    std::vector<std::string> out;
+    std::string token;
+    for (std::size_t i = 0; i <= text.size(); ++i) {
+        if (i == text.size() || text[i] == ',') {
+            const auto begin = token.find_first_not_of(" \t");
+            const auto end = token.find_last_not_of(" \t");
+            if (begin != std::string::npos) {
+                out.push_back(token.substr(begin, end - begin + 1));
+            }
+            token.clear();
+        } else {
+            token.push_back(text[i]);
+        }
+    }
+    return out;
+}
+
+std::vector<RgbColor> palette(const std::string& text) {
+    std::vector<RgbColor> out;
+    for (const auto& token : splitList(text)) {
+        if (token.size() == 7 && token[0] == '#') {
+            out.push_back(hex(token, {255, 255, 255}));
+        }
+    }
+    return out;
+}
+
+}  // namespace color
+
 BlendMode parseBlendMode(const std::string& name, bool* ok) {
     std::string lowered;
     lowered.reserve(name.size());

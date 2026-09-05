@@ -13,9 +13,8 @@ namespace kb::cfg {
  */
 class ConfigWatcher {
 public:
-    ConfigWatcher(const std::string& config_path) 
-        : config_path_(config_path), 
-          last_modified_(0),
+    ConfigWatcher(const std::string& config_path)
+        : config_path_(config_path),
           change_detected_(false) {
         updateLastModified();
     }
@@ -25,9 +24,8 @@ public:
      * @return true if file was modified, false otherwise
      */
     bool hasChanged() {
-        auto current_modified = getLastModified();
-        
-        if (current_modified == 0) {
+        std::filesystem::file_time_type current_modified{};
+        if (!getLastModified(current_modified)) {
             // File doesn't exist or can't be accessed
             return false;
         }
@@ -54,7 +52,9 @@ public:
      * Manually update the tracked modification time.
      */
     void updateLastModified() {
-        last_modified_ = getLastModified();
+        if (!getLastModified(last_modified_)) {
+            last_modified_ = std::filesystem::file_time_type::min();
+        }
     }
 
     /**
@@ -72,28 +72,28 @@ public:
     }
 
 private:
-    using timestamp_t = std::chrono::system_clock::time_point::rep;
-
-    timestamp_t getLastModified() const {
-        try {
-            if (!std::filesystem::exists(config_path_)) {
-                return 0;
-            }
-            auto last_write = std::filesystem::last_write_time(config_path_);
-            // Convert to duration since epoch
-            auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-                last_write - std::filesystem::file_time_type::clock::now() + 
-                std::chrono::system_clock::now()
-            );
-            return sctp.time_since_epoch().count();
-        } catch (const std::exception& e) {
-            std::cerr << "[ConfigWatcher] Error checking file modification: " << e.what() << '\n';
-            return 0;
+    // Compare raw file_time_type values. Converting them into system_clock
+    // (last_write - file_clock::now() + system_clock::now()) re-reads both
+    // clocks on every poll, so the result drifts by however much the two
+    // clocks disagree between calls -- which made this report a change on an
+    // untouched file, silently reloading the config and killing any running
+    // game or profile hold.
+    bool getLastModified(std::filesystem::file_time_type& out) const {
+        std::error_code ec;
+        if (!std::filesystem::exists(config_path_, ec) || ec) {
+            return false;
         }
+        out = std::filesystem::last_write_time(config_path_, ec);
+        if (ec) {
+            std::cerr << "[ConfigWatcher] Cannot stat " << config_path_ << ": " << ec.message()
+                      << '\n';
+            return false;
+        }
+        return true;
     }
 
     std::string config_path_;
-    timestamp_t last_modified_;
+    std::filesystem::file_time_type last_modified_{};
     std::atomic<bool> change_detected_;
 };
 

@@ -26,6 +26,8 @@ sinoctl state build fail   # turn the F row red from a CI script
 - [Effects](#effects)
 - [Games](#games)
 - [System-state layers](#system-state-layers)
+- [Temporary profiles](#temporary-profiles)
+- [Shell completion](#shell-completion)
 - [Architecture](#architecture)
 - [Packet format](#packet-format)
 
@@ -134,6 +136,7 @@ The same commands work at the interactive prompt and through `sinoctl`.
 | `list` | Presets, and which are currently drawn |
 | `profiles` | Configured profiles |
 | `profile <name>` | Activate a profile |
+| `profile <name> for <30s\|5m\|1h>` | Hold a profile, then go back to the one the current window asks for |
 | `brightness [0-100]` | Get or set master brightness |
 | `frame <ms>` | Animation frame interval |
 | `set <index> <key> <value>` | Change a preset parameter live |
@@ -142,6 +145,8 @@ The same commands work at the interactive prompt and through `sinoctl`.
 | `game <name> <start\|stop>` | Run a game; `game stop` stops whichever is running |
 | `metric <name> <0..1>` | Feed a value to a `system_meter` layer |
 | `state <name> <value>` | Set a `status_light` state |
+| `pomodoro <start\|pause\|reset\|skip\|status>` | Drive a `pomodoro` layer |
+| `complete <profiles\|games\|commands>` | Names for shell completion |
 | `reload` | Re-read the config in place |
 | `watch <on\|off>` | Watch the config file for changes |
 | `quit` | Shut the daemon down |
@@ -289,6 +294,10 @@ the `[device]` section needs a new handle, so that one restarts the runtime.
 | `reactive_ripple` | Rings from keystrokes. `wave_speed`, `decay_time`, `thickness` |
 | `space_colonization` | Growing roots. `attractors`, `kill_dist`, `segment_len`, `lifespan` |
 | `typing_heatmap` | Where you type. `half_life`, `gain`, `spread`, `palette` |
+| `matrix_rain` | Falling code. `direction`, `speed`, `density`, `tail` |
+| `lightning` | Forked bolts from keystrokes. `branch_chance`, `max_length`, `ambient_interval` |
+| `fireworks` | Shells launched by keystrokes. `sparks`, `gravity`, `spark_life`, `palette` |
+| `pomodoro` | Work/break timer as a bar — see below |
 | `system_meter` | A value as a bar — see below |
 | `status_light` | An externally driven state — see below |
 
@@ -321,12 +330,19 @@ Declare one as a layer in its own profile to make it available:
 | --- | --- |
 | `snake` | Arrows steer; Enter/Space restarts after a crash |
 | `tetris` | Up/Down move, Space rotates, Left hard-drops |
-| `pong` | Up/Down move your paddle (the left column) |
+| `pong` | Two players: left uses W/S, right uses Up/Down. First to `win_score` (7) wins. `opponent = "ai"` for solo |
 | `life` | Press any key to toggle the cell under it |
+| `connect4` | Two players; 1-7 drop a disc, Enter resets |
+| `breakout` | Left/Right move the paddle, Space serves |
+| `flappy` | Any key flaps |
+| `simon` | Repeat the sequence on the A/S/D/F pads |
+| `reaction` | Hit the key that lights, as fast as you can |
 
 Tetris runs sideways: the board is six rows tall and sixteen wide, far too
 short for pieces to fall down it, so gravity runs along the long axis and a
-full *column* is what clears.
+full *column* is what clears. Connect Four gets the opposite treatment — its
+grid is 7x6, which fits as-is, so it is centred with a margin either side
+rather than stretched.
 
 Games need the `keycodes` CSV — that is how they read input.
 
@@ -365,6 +381,59 @@ sinoctl metric deploy 0.6    # feeds a system_meter with metric = "deploy"
 ```
 
 `ok` fades out after `ok_timeout` so a green build does not stay lit all day.
+
+The pomodoro timer works the same way — a layer you leave in a profile and
+drive from outside:
+
+```toml
+[[profiles.focus.layers]]
+  type = "pomodoro"
+  work_minutes = 25.0
+  short_break_minutes = 5.0
+  bar_keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+```
+
+```bash
+sinoctl pomodoro start     # red bar draining across the number row
+sinoctl pomodoro status    # work 12m41s remaining, round 2/4
+sinoctl pomodoro skip
+```
+
+---
+
+## Temporary profiles
+
+`profile <name> for <duration>` holds a profile for a while and then goes back:
+
+```bash
+sinoctl profile focus for 25m
+```
+
+While the hold is up, switching windows does not change the lighting — it only
+changes where the hold reverts *to*, so when it expires you get the profile for
+whatever window you are actually looking at. `30s`, `5m` and `1h` all work, and
+a bare number means seconds. `profile <name>` with no duration cancels a hold.
+
+---
+
+## Shell completion
+
+Completions for bash, zsh and fish live in `packaging/completions/`. They ask
+the running daemon for the real names, so a profile you added to your config
+shows up without regenerating anything:
+
+```bash
+# bash
+sudo install -m644 packaging/completions/sinoctl.bash \
+  /usr/share/bash-completion/completions/sinoctl
+# zsh
+sudo install -m644 packaging/completions/_sinoctl /usr/share/zsh/site-functions/_sinoctl
+# fish
+install -m644 packaging/completions/sinoctl.fish \
+  ~/.config/fish/completions/sinoctl.fish
+```
+
+With no daemon running they fall back to the static command list.
 
 ---
 

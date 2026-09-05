@@ -1,6 +1,7 @@
 #include "keyboard_configurator/pong_preset.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <random>
 
@@ -46,15 +47,46 @@ void PongPreset::configure(const ParameterMap& params) {
     number("ai_speed", ai_speed_, 0.5);
     number("paddle_height", paddle_height_, 1.0);
 
-    auto color = [&](const char* key, RgbColor& target) {
-        if (auto it = params.find(key); it != params.end()) {
+    if (auto it = params.find("win_score"); it != params.end()) {
+        try {
+            win_score_ = std::max(1, std::stoi(it->second));
+        } catch (...) {
+        }
+    }
+
+    // Solo play against the computer stays available, it is just no longer the
+    // default -- two people on one keyboard is the point of this one.
+    if (auto it = params.find("opponent"); it != params.end()) {
+        std::string mode = it->second;
+        std::transform(mode.begin(), mode.end(), mode.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        ai_opponent_ = (mode == "ai" || mode == "cpu" || mode == "computer");
+    }
+
+    // Keys are compared against the same normalised labels GameInput reports,
+    // so "up", "Up" and "KEY_UP" all mean the same thing in the config.
+    auto key = [&](const char* name, std::string& target) {
+        if (auto it = params.find(name); it != params.end() && !it->second.empty()) {
+            target = normalizeKeyLabel(it->second);
+        }
+    };
+    key("left_up", left_up_);
+    key("left_down", left_down_);
+    key("right_up", right_up_);
+    key("right_down", right_down_);
+
+    auto color = [&](const char* name, RgbColor& target) {
+        if (auto it = params.find(name); it != params.end()) {
             target = parseHex(it->second, target);
         }
     };
-    color("color_player", color_player_);
-    color("color_ai", color_ai_);
+    color("color_left", color_left_);
+    color("color_right", color_right_);
     color("color_ball", color_ball_);
     color("background", color_background_);
+    // Accept the old single-player names too, so existing configs keep working.
+    color("color_player", color_left_);
+    color("color_ai", color_right_);
 }
 
 void PongPreset::setKeyActivityProvider(KeyActivityProviderPtr provider) {
@@ -65,11 +97,13 @@ void PongPreset::setKeyActivityProvider(KeyActivityProviderPtr provider) {
 void PongPreset::startGame(const KeyboardModel& model) {
     board_.build(model);
     running_ = true;
-    player_score_ = 0;
-    ai_score_ = 0;
-    player_y_ = board_.height() / 2.0;
-    ai_y_ = board_.height() / 2.0;
+    left_score_ = 0;
+    right_score_ = 0;
+    left_y_ = board_.height() / 2.0;
+    right_y_ = board_.height() / 2.0;
     last_time_ = 0.0;
+    flash_until_ = 0.0;
+    flash_is_win_ = false;
     input_.reset();
     serve(1);
 }
@@ -91,15 +125,48 @@ void PongPreset::serve(int towards) {
 }
 
 void PongPreset::handleInput(const KeyboardModel& model) {
+    const double limit = std::max(0.0, board_.height() - paddle_height_);
+
     for (const auto& key : input_.poll(model)) {
-        if (key == "UP" || key == "W") {
-            player_y_ -= 1.0;
-        } else if (key == "DOWN" || key == "S") {
-            player_y_ += 1.0;
+        if (key == left_up_) {
+            left_y_ -= 1.0;
+        } else if (key == left_down_) {
+            left_y_ += 1.0;
+        } else if (!ai_opponent_) {
+            if (key == right_up_) {
+                right_y_ -= 1.0;
+            } else if (key == right_down_) {
+                right_y_ += 1.0;
+            }
         }
     }
-    const double limit = std::max(0.0, board_.height() - paddle_height_);
-    player_y_ = std::clamp(player_y_, 0.0, limit);
+
+    left_y_ = std::clamp(left_y_, 0.0, limit);
+    right_y_ = std::clamp(right_y_, 0.0, limit);
+}
+
+void PongPreset::score(bool left_scored, double now) {
+    if (left_scored) {
+        ++left_score_;
+    } else {
+        ++right_score_;
+    }
+
+    flash_is_left_ = left_scored;
+    const int winner_score = left_scored ? left_score_ : right_score_;
+
+    if (winner_score >= win_score_) {
+        // Match over: a longer flash in the winner's colour, then a fresh game.
+        flash_is_win_ = true;
+        flash_until_ = now + 2.0;
+        left_score_ = 0;
+        right_score_ = 0;
+    } else {
+        flash_is_win_ = false;
+        flash_until_ = now + 0.6;
+    }
+
+    serve(left_scored ? 1 : -1);
 }
 
 void PongPreset::step(const KeyboardModel& model, double dt) {
@@ -120,38 +187,34 @@ void PongPreset::step(const KeyboardModel& model, double dt) {
         ball_vy_ = -ball_vy_;
     }
 
-    // The computer chases the ball, but capped, so it can be beaten.
-    const double target = ball_y_ - paddle_height_ / 2.0;
-    const double step_limit = ai_speed_ * dt;
-    ai_y_ += std::clamp(target - ai_y_, -step_limit, step_limit);
-    ai_y_ = std::clamp(ai_y_, 0.0, std::max(0.0, height - paddle_height_));
+    if (ai_opponent_) {
+        // The computer chases the ball, but capped, so it can be beaten.
+        const double target = ball_y_ - paddle_height_ / 2.0;
+        const double step_limit = ai_speed_ * dt;
+        right_y_ += std::clamp(target - right_y_, -step_limit, step_limit);
+        right_y_ = std::clamp(right_y_, 0.0, std::max(0.0, height - paddle_height_));
+    }
 
     const auto hits = [&](double paddle_y) {
         return ball_y_ >= paddle_y - 0.5 && ball_y_ <= paddle_y + paddle_height_ - 0.5;
     };
 
     if (ball_x_ <= 0.0) {
-        if (hits(player_y_)) {
+        if (hits(left_y_)) {
             ball_x_ = -ball_x_;
             ball_vx_ = -ball_vx_;
             // Steer with the paddle: hitting off-centre angles the return.
-            ball_vy_ += (ball_y_ - (player_y_ + paddle_height_ / 2.0 - 0.5)) * 2.0;
+            ball_vy_ += (ball_y_ - (left_y_ + paddle_height_ / 2.0 - 0.5)) * 2.0;
         } else {
-            ++ai_score_;
-            flash_until_ = last_time_ + 0.6;
-            flash_is_player_ = false;
-            serve(1);
+            score(/*left_scored=*/false, last_time_);
         }
     } else if (ball_x_ >= width - 1.0) {
-        if (hits(ai_y_)) {
+        if (hits(right_y_)) {
             ball_x_ = 2.0 * (width - 1.0) - ball_x_;
             ball_vx_ = -ball_vx_;
-            ball_vy_ += (ball_y_ - (ai_y_ + paddle_height_ / 2.0 - 0.5)) * 2.0;
+            ball_vy_ += (ball_y_ - (right_y_ + paddle_height_ / 2.0 - 0.5)) * 2.0;
         } else {
-            ++player_score_;
-            flash_until_ = last_time_ + 0.6;
-            flash_is_player_ = true;
-            serve(-1);
+            score(/*left_scored=*/true, last_time_);
         }
     }
 
@@ -184,30 +247,34 @@ void PongPreset::render(const KeyboardModel& model, double time_seconds, KeyColo
         }
     };
 
-    // A point scored flashes the scorer's whole side.
     const bool flashing = time_seconds < flash_until_;
     if (flashing) {
-        const RgbColor tint = flash_is_player_ ? color_player_ : color_ai_;
+        const RgbColor tint = flash_is_left_ ? color_left_ : color_right_;
+        // Winning the match flashes harder than winning a rally.
+        const double strength = flash_is_win_
+                                    ? 0.35 + 0.45 * (0.5 + 0.5 * std::sin(time_seconds * 12.0))
+                                    : 0.25;
         for (int y = 0; y < board_.height(); ++y) {
             for (int x = 0; x < board_.width(); ++x) {
-                put(x, y, mixColors(color_background_, tint, 0.25));
+                put(x, y, mixColors(color_background_, tint, strength));
             }
         }
     }
 
     for (int i = 0; i < static_cast<int>(paddle_height_); ++i) {
-        put(0, static_cast<int>(std::lround(player_y_)) + i, color_player_);
-        put(board_.width() - 1, static_cast<int>(std::lround(ai_y_)) + i, color_ai_);
+        put(0, static_cast<int>(std::lround(left_y_)) + i, color_left_);
+        put(board_.width() - 1, static_cast<int>(std::lround(right_y_)) + i, color_right_);
     }
 
     put(static_cast<int>(std::lround(ball_x_)), static_cast<int>(std::lround(ball_y_)), color_ball_);
 
-    // Score shown as lit cells along the top row, from each player's own end.
-    for (int i = 0; i < std::min(player_score_, board_.width() / 2 - 1); ++i) {
-        put(1 + i, 0, mixColors(color_background_, color_player_, 0.7));
+    // Score along the top row, counting inward from each player's own end.
+    const int half = std::max(1, board_.width() / 2 - 1);
+    for (int i = 0; i < std::min(left_score_, half); ++i) {
+        put(1 + i, 0, mixColors(color_background_, color_left_, 0.7));
     }
-    for (int i = 0; i < std::min(ai_score_, board_.width() / 2 - 1); ++i) {
-        put(board_.width() - 2 - i, 0, mixColors(color_background_, color_ai_, 0.7));
+    for (int i = 0; i < std::min(right_score_, half); ++i) {
+        put(board_.width() - 2 - i, 0, mixColors(color_background_, color_right_, 0.7));
     }
 }
 
