@@ -145,3 +145,13 @@ install(FILES packaging/70-sinodragon.rules
         DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/udev/rules.d)
 install(FILES packaging/sinodragon.service
         DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/user)
+
+# Shell completions. Profile and game names are queried from the running
+# daemon via `sinoctl complete`, so they always match the loaded config.
+install(FILES packaging/completions/sinoctl.bash
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/bash-completion/completions
+        RENAME sinoctl)
+install(FILES packaging/completions/_sinoctl
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/zsh/site-functions)
+install(FILES packaging/completions/sinoctl.fish
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/fish/vendor_completions.d)

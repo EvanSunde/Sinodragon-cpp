@@ -570,6 +570,9 @@ std::string Runtime::execute(const std::string& line) {
     if (cmd == "game") {
         return cmdGame(args);
     }
+    if (cmd == "complete") {
+        return cmdComplete(args);
+    }
     if (cmd == "snake") {
         // Kept as an alias; `game snake start` is the general form.
         return cmdGame("snake " + (args.empty() ? std::string("start") : args));
@@ -823,6 +826,61 @@ std::string Runtime::cmdBrightness(const std::string& arg) {
     brightness_.store(static_cast<int>(value));
     wake();
     return "Brightness set to " + std::to_string(value) + "%";
+}
+
+// Bare newline-separated names for shell completion. Deliberately not
+// pretty-printed: completion scripts consume this directly.
+std::string Runtime::cmdComplete(const std::string& args) {
+    const auto [what, ignored] = splitCommand(args);
+    (void)ignored;
+
+    std::ostringstream out;
+
+    if (what == "profiles") {
+        std::lock_guard<std::mutex> guard(engine_mutex_);
+        if (!hypr_) {
+            return {};
+        }
+        std::vector<std::string> names;
+        names.reserve(hypr_->profile_draw_order.size());
+        for (const auto& [name, order] : hypr_->profile_draw_order) {
+            names.push_back(name);
+        }
+        std::sort(names.begin(), names.end());
+        for (const auto& name : names) {
+            out << name << '\n';
+        }
+        return out.str();
+    }
+
+    if (what == "games") {
+        std::lock_guard<std::mutex> guard(engine_mutex_);
+        std::vector<std::string> names;
+        for (std::size_t i = 0; i < engine_.presetCount(); ++i) {
+            if (auto* game = dynamic_cast<GamePreset*>(&engine_.presetAt(i))) {
+                names.push_back(game->gameName());
+            }
+        }
+        std::sort(names.begin(), names.end());
+        for (const auto& name : names) {
+            out << name << '\n';
+        }
+        return out.str();
+    }
+
+    if (what == "commands" || what.empty()) {
+        static const char* kCommands[] = {
+            "help",  "status", "list",   "profiles", "profile", "brightness", "frame",
+            "set",   "toggle", "game",   "metric",   "state",   "reload",     "watch",
+            "quit",  "complete",
+        };
+        for (const char* command : kCommands) {
+            out << command << '\n';
+        }
+        return out.str();
+    }
+
+    return "Usage: complete <commands|profiles|games>";
 }
 
 std::string Runtime::listGames() {
