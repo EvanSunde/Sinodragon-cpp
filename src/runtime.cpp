@@ -49,6 +49,32 @@ bool parseIndex(const std::string& text, std::size_t& out) {
     }
 }
 
+// Parses "30s", "5m", "1h" or a bare number of seconds. Returns false when the
+// text is not a duration at all.
+bool parseDuration(const std::string& text, std::chrono::seconds& out) {
+    if (text.empty()) {
+        return false;
+    }
+    double scale = 1.0;
+    std::string digits = text;
+    const char suffix = static_cast<char>(std::tolower(static_cast<unsigned char>(text.back())));
+    if (suffix == 's' || suffix == 'm' || suffix == 'h') {
+        digits = text.substr(0, text.size() - 1);
+        scale = (suffix == 'm') ? 60.0 : (suffix == 'h') ? 3600.0 : 1.0;
+    }
+    try {
+        std::size_t consumed = 0;
+        const double value = std::stod(digits, &consumed);
+        if (consumed != digits.size() || value <= 0.0) {
+            return false;
+        }
+        out = std::chrono::seconds(static_cast<long long>(value * scale));
+        return out.count() > 0;
+    } catch (...) {
+        return false;
+    }
+}
+
 }  // namespace
 
 Runtime::Runtime(RuntimeConfig config, std::string config_path, const ConfigLoader& loader)
@@ -141,6 +167,8 @@ void Runtime::requestQuit() {
 void Runtime::renderLoop() {
     std::unique_lock<std::mutex> lock(loop_mutex_);
     while (!stop_.load()) {
+        expireTemporaryProfileIfDue();
+
         bool animated = false;
         {
             std::lock_guard<std::mutex> guard(engine_mutex_);
@@ -272,6 +300,12 @@ void Runtime::activateProfileForWindow(const std::string& window_class, const st
             profile = (it != hypr_->class_to_profile.end()) ? it->second : hypr_->default_profile;
         }
         if (profile.empty()) {
+            return;
+        }
+        if (temporary_profile_active_) {
+            // A hold is in force: remember where the window wants us to go, but
+            // do not go there until the hold expires.
+            revert_profile_ = profile;
             return;
         }
         applyProfileLocked(profile);
@@ -434,6 +468,8 @@ std::string Runtime::reload() {
         // composition pointing at the old ones has to go.
         game_override_active_ = false;
         overlay_active_ = false;
+        temporary_profile_active_ = false;
+        revert_profile_.clear();
         active_game_.clear();
         saved_state_valid_ = false;
         saved_draw_list_.clear();
@@ -485,7 +521,7 @@ std::string Runtime::execute(const std::string& line) {
                "  status                    daemon and device state\n"
                "  list                      list presets\n"
                "  profiles                  list configured profiles\n"
-               "  profile <name>            activate a profile\n"
+               "  profile <name> [for <t>]  activate a profile, optionally for 30s/5m/1h\n"
                "  toggle <index>            toggle a preset on/off\n"
                "  set <index> <key> <value> set a preset parameter\n"
                "  frame <ms>                animation frame interval\n"
@@ -562,6 +598,13 @@ std::string Runtime::describeStatus() {
     out << "animated:  " << (engine_.hasAnimatedEnabled() ? "yes" : "no") << '\n';
     out << "interval:  " << frame_interval_ms_.load() << " ms\n";
     out << "brightness: " << brightness_.load() << "%\n";
+    if (temporary_profile_active_) {
+        const auto left = std::chrono::duration_cast<std::chrono::seconds>(
+                              temporary_profile_expiry_ - std::chrono::steady_clock::now())
+                              .count();
+        out << "hold:      " << std::max<long long>(0, left) << "s, then "
+            << (revert_profile_.empty() ? "default" : revert_profile_) << '\n';
+    }
     if (!active_game_.empty()) {
         out << "game:      " << active_game_ << '\n';
     }
@@ -611,20 +654,70 @@ std::string Runtime::describeProfiles() {
     return out.str();
 }
 
-std::string Runtime::cmdProfile(const std::string& arg) {
-    if (arg.empty()) {
-        return "Usage: profile <name>";
+std::string Runtime::cmdProfile(const std::string& args) {
+    if (args.empty()) {
+        return "Usage: profile <name> [for <duration>]";
     }
+
+    // profile <name> [for|--for|-f] <30s|5m|1h|seconds>
+    const auto [name, rest] = splitCommand(args);
+    std::chrono::seconds hold{0};
+    if (!rest.empty()) {
+        const auto [keyword, duration_text] = splitCommand(rest);
+        if (keyword != "for" && keyword != "--for" && keyword != "-f") {
+            return "Usage: profile <name> [for <duration>]";
+        }
+        if (!parseDuration(duration_text, hold)) {
+            return "Invalid duration '" + duration_text + "'; try 30s, 5m or 1h";
+        }
+    }
+
     bool applied = false;
     {
         std::lock_guard<std::mutex> guard(engine_mutex_);
-        applied = applyProfileLocked(arg);
+        // Remember where to go back to before the hold overwrites it.
+        const std::string previous = temporary_profile_active_ ? revert_profile_ : active_profile_;
+        applied = applyProfileLocked(name);
+        if (applied) {
+            if (hold.count() > 0) {
+                temporary_profile_active_ = true;
+                revert_profile_ = previous;
+                temporary_profile_expiry_ = std::chrono::steady_clock::now() + hold;
+            } else {
+                temporary_profile_active_ = false;
+                revert_profile_.clear();
+            }
+        }
     }
     if (!applied) {
-        return "No such profile: " + arg;
+        return "No such profile: " + name;
     }
     wake();
-    return "Activated profile " + arg;
+    if (hold.count() > 0) {
+        return "Activated profile " + name + " for " + std::to_string(hold.count()) + "s";
+    }
+    return "Activated profile " + name;
+}
+
+void Runtime::expireTemporaryProfileIfDue() {
+    std::string revert_to;
+    {
+        std::lock_guard<std::mutex> guard(engine_mutex_);
+        if (!temporary_profile_active_ ||
+            std::chrono::steady_clock::now() < temporary_profile_expiry_) {
+            return;
+        }
+        temporary_profile_active_ = false;
+        revert_to = revert_profile_;
+        revert_profile_.clear();
+
+        if (!revert_to.empty()) {
+            applyProfileLocked(revert_to);
+        } else if (hypr_ && !hypr_->default_profile.empty()) {
+            applyProfileLocked(hypr_->default_profile);
+        }
+    }
+    wake();
 }
 
 std::string Runtime::cmdToggle(const std::string& arg) {
