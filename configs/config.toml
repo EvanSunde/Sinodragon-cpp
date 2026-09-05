@@ -448,12 +448,18 @@
       step_interval = 0.4
       type = "tetris"
 
+  # Two players on one keyboard: left player W/S, right player Up/Down.
+  # Set opponent = "ai" to play the computer instead.
   [profiles.pong_game]
 
     [[profiles.pong_game.layers]]
       ball_speed = 6.0
-      ai_speed = 4.5
       paddle_height = 2.0
+      win_score = 7
+      left_up = "W"
+      left_down = "S"
+      right_up = "Up"
+      right_down = "Down"
       type = "pong"
 
   [profiles.life_game]

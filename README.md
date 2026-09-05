@@ -321,7 +321,7 @@ Declare one as a layer in its own profile to make it available:
 | --- | --- |
 | `snake` | Arrows steer; Enter/Space restarts after a crash |
 | `tetris` | Up/Down move, Space rotates, Left hard-drops |
-| `pong` | Up/Down move your paddle (the left column) |
+| `pong` | Two players: left uses W/S, right uses Up/Down. First to `win_score` (7) wins. `opponent = "ai"` for solo |
 | `life` | Press any key to toggle the cell under it |
 
 Tetris runs sideways: the board is six rows tall and sixteen wide, far too

@@ -156,5 +156,5 @@ This document describes the various effects and the configuration options availa
     - Options:
         - snake: step_interval (Float) -- seconds per move.
         - tetris: step_interval (Float), background, palette (Comma-separated hex codes).
-        - pong: ball_speed, ai_speed, paddle_height (Floats); color_player, color_ai, color_ball, background.
+        - pong: two players by default -- left paddle W/S, right paddle Up/Down. ball_speed, paddle_height (Floats); win_score (Integer, default 7); left_up, left_down, right_up, right_down (key labels); opponent ("human" default, or "ai"/"cpu" for a computer right-hand player, which then uses ai_speed); color_left, color_right, color_ball, background (color_player/color_ai still accepted).
         - life: step_interval (Float), density (Float, 0.0 to 1.0 seeding density); color_alive, color_new, background.
