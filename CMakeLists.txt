@@ -71,6 +71,11 @@ add_library(sinodragon_core STATIC
     src/pomodoro_preset.cpp
     src/lightning_preset.cpp
     src/fireworks_preset.cpp
+    src/connect_four_preset.cpp
+    src/breakout_preset.cpp
+    src/flappy_preset.cpp
+    src/simon_preset.cpp
+    src/reaction_preset.cpp
     src/effect_engine.cpp
     src/runtime.cpp
     src/app_options.cpp

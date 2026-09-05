@@ -469,6 +469,51 @@
       density = 0.3
       type = "life"
 
+  # Connect Four is exactly 7x6, which is what this board is. Two players
+  # share the keyboard: 1-7 drop a disc, Enter restarts.
+  [profiles.connect4_game]
+
+    [[profiles.connect4_game.layers]]
+      type = "connect4"
+      column_keys = ["1", "2", "3", "4", "5", "6", "7"]
+      reset_key = "Enter"
+
+  # Left/Right move the paddle, Space serves.
+  [profiles.breakout_game]
+
+    [[profiles.breakout_game.layers]]
+      type = "breakout"
+      ball_speed = 7.0
+      paddle_width = 3.0
+      brick_rows = 2
+      lives = 3
+
+  # Any key flaps.
+  [profiles.flappy_game]
+
+    [[profiles.flappy_game.layers]]
+      type = "flappy"
+      gravity = 14.0
+      flap = 4.5
+      scroll = 5.0
+      gap = 3
+
+  # Repeat the flashed sequence on A/S/D/F.
+  [profiles.simon_game]
+
+    [[profiles.simon_game.layers]]
+      type = "simon"
+      pads = ["A", "S", "D", "F"]
+      step_seconds = 0.55
+
+  # Hit the lit key as fast as you can.
+  [profiles.reaction_game]
+
+    [[profiles.reaction_game.layers]]
+      type = "reaction"
+      min_wait = 1.5
+      max_wait = 5.0
+
   # System monitors. CPU across the function row, memory across the numbers,
   # battery on the top row (drops out on desktops, which have no battery).
   [profiles.sysmon]
