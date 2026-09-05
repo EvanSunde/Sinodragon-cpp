@@ -99,12 +99,20 @@ sinodragon [options] [config.toml]
                         to the keyboard (implies --daemon)
   -s, --socket <path>   Control socket to listen on
       --no-socket       Do not listen for control commands
+      --lock <path>     Single-instance lock file (default: socket path + .lock)
+      --no-lock         Allow more than one instance (not recommended)
   -h, --help            Show this help
   -v, --version         Show the version
 ```
 
 With no config argument it looks for `$XDG_CONFIG_HOME/sinodragon/config.toml`,
 then `~/.config/sinodragon/config.toml`, then `./configs/config.toml`.
+
+Only one daemon runs at a time: a second one refuses to start (exit code 3)
+rather than fighting the first over the keyboard. The lock is released
+automatically when the daemon exits, crash included. To drive two keyboards
+with two daemons, give each its own `--socket` (which gives each its own lock);
+`--no-lock` disables the check entirely.
 
 `--preview` renders each frame as coloured blocks laid out in the physical key
 grid. It decodes the same bytes that would go to the device, so what you see

@@ -60,6 +60,15 @@ AppOptions parseArgs(int argc, char** argv) {
                 return options;
             }
             options.socket_path = argv[++i];
+        } else if (arg == "--lock") {
+            if (i + 1 >= argc) {
+                options.valid = false;
+                options.error = arg + " needs a path";
+                return options;
+            }
+            options.lock_path = argv[++i];
+        } else if (arg == "--no-lock") {
+            options.single_instance = false;
         } else if (arg == "-c" || arg == "--config") {
             if (i + 1 >= argc) {
                 options.valid = false;
@@ -98,6 +107,9 @@ std::string usageText() {
            "  -s, --socket <path>   Control socket to listen on\n"
            "                        (default: $XDG_RUNTIME_DIR/sinodragon.sock)\n"
            "      --no-socket       Do not listen for control commands\n"
+           "      --lock <path>     Single-instance lock file\n"
+           "                        (default: the socket path + .lock)\n"
+           "      --no-lock         Allow more than one instance (not recommended)\n"
            "  -h, --help            Show this help\n"
            "  -v, --version         Show the version\n"
            "\n"
