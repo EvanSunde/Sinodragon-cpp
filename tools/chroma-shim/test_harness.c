@@ -120,10 +120,38 @@ int main(void) {
         printf("      transport is blocking the caller.\n");
     }
 
+    // The death-and-reload cycle. Dead Cells closes and reopens its Chroma
+    // session when a run ends, and UnInit runs on the game's own thread -- so
+    // if it blocks, the game visibly freezes at exactly that moment. Time it.
+    int slowest = 0;
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        DWORD at = GetTickCount();
+        uninit();
+        const int uninit_ms = (int)(GetTickCount() - at);
+
+        at = GetTickCount();
+        init();
+        const int init_ms = (int)(GetTickCount() - at);
+
+        for (int frame = 0; frame < 10; ++frame) {
+            create(CHROMA_CUSTOM, &custom, NULL);
+            Sleep(16);
+        }
+        printf("ok    cycle %d: UnInit %d ms, Init %d ms\n", cycle + 1, uninit_ms, init_ms);
+        if (uninit_ms > slowest) slowest = uninit_ms;
+        if (init_ms > slowest) slowest = init_ms;
+    }
+
+    if (slowest > 100) {
+        printf("FAIL  %d ms on the caller's thread -- a game would freeze here\n", slowest);
+    } else {
+        printf("ok    no cycle stalled the caller (worst %d ms)\n", slowest);
+    }
+
     result = uninit();
     printf("%s UnInit returned %ld\n", result == 0 ? "ok   " : "FAIL ", (long)result);
 
     FreeLibrary(module);
-    printf("\ndone -- check the server log for 122 frames.\n");
-    return 0;
+    printf("\ndone -- check the server log for the frames and session churn.\n");
+    return slowest > 100 ? 1 : 0;
 }

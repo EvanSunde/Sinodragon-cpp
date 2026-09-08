@@ -132,15 +132,35 @@ static COLORREF g_frame[KB_ROWS][KB_COLS];
 static BOOL g_frame_pending = FALSE;
 static HANDLE g_frame_event = NULL;
 static HANDLE g_worker = NULL;
-static volatile LONG g_running = 0;
+static volatile LONG g_running = 0;        // Worker alive; process lifetime.
+static volatile LONG g_session_active = 0;  // Between the game's Init and UnInit.
 static volatile LONG g_frames_in = 0;
 static volatile LONG g_frames_sent = 0;
 
+// Everything a game's own thread wants to report goes into a counter here, and
+// the worker turns it into log lines. Writing to the log from an exported
+// function would put an fflush -- a blocking pipe write, under Wine -- in the
+// middle of the game's render thread, and a terminal that is slow to drain
+// would then show up as the game stuttering or hanging.
+enum {
+    CALL_MOUSE, CALL_HEADSET, CALL_MOUSEPAD, CALL_KEYPAD, CALL_CHROMALINK,
+    CALL_GENERIC, CALL_KIND_COUNT
+};
+static const char* const kCallNames[CALL_KIND_COUNT] = {
+    "mouse", "headset", "mousepad", "keypad", "chromalink", "CreateEffect"
+};
+static volatile LONG g_calls[CALL_KIND_COUNT];
+static volatile LONG g_unhandled_effect = -1;
+
 // ---------------------------------------------------------------- transport
 
-// One connection per request. At 30 Hz over loopback that is cheap, and it
-// keeps us correct when the server closes an idle connection between frames.
-static SOCKET http_connect(void) {
+static struct sockaddr_in g_server_addr;
+static BOOL g_server_addr_valid = FALSE;
+
+// Resolved once, when the worker starts. Calling getaddrinfo per request would
+// put a name lookup between every frame and the wire, and under Wine that
+// reaches the host resolver.
+static BOOL resolve_server(void) {
     struct addrinfo hints;
     struct addrinfo* result = NULL;
     char port_text[16];
@@ -149,30 +169,43 @@ static SOCKET http_connect(void) {
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
+    hints.ai_flags = AI_NUMERICHOST;  // The default really is an address.
     snprintf(port_text, sizeof(port_text), "%d", g_port);
 
     if (getaddrinfo(g_host, port_text, &hints, &result) != 0) {
+        hints.ai_flags = 0;  // Someone pointed us at a hostname after all.
+        if (getaddrinfo(g_host, port_text, &hints, &result) != 0) {
+            return FALSE;
+        }
+    }
+    memcpy(&g_server_addr, result->ai_addr, sizeof(g_server_addr));
+    freeaddrinfo(result);
+    g_server_addr_valid = TRUE;
+    return TRUE;
+}
+
+// One connection per request. At 30 Hz over loopback that is cheap, and it
+// keeps us correct when the server closes an idle connection between frames.
+static SOCKET http_connect(void) {
+    if (!g_server_addr_valid) {
         return INVALID_SOCKET;
     }
 
-    SOCKET sock = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == INVALID_SOCKET) {
-        freeaddrinfo(result);
         return INVALID_SOCKET;
     }
 
     // Without a timeout a wedged server would stall the worker forever, and
     // the frame slot would stop draining.
-    DWORD timeout_ms = 2000;
+    DWORD timeout_ms = 1000;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout_ms, sizeof(timeout_ms));
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout_ms, sizeof(timeout_ms));
 
-    if (connect(sock, result->ai_addr, (int)result->ai_addrlen) != 0) {
+    if (connect(sock, (const struct sockaddr*)&g_server_addr, sizeof(g_server_addr)) != 0) {
         closesocket(sock);
-        freeaddrinfo(result);
         return INVALID_SOCKET;
     }
-    freeaddrinfo(result);
     return sock;
 }
 
@@ -312,28 +345,53 @@ static DWORD WINAPI worker_main(LPVOID unused) {
         shim_log("WSAStartup failed; lighting will not be forwarded");
         return 0;
     }
-
-    // Register with the server. A failure here is not fatal: the game keeps
-    // running, and the next frame retries against the default path.
-    char reply[1024];
-    const char* app_info =
-        "{\"title\":\"sinodragon-chroma-shim\","
-        "\"description\":\"Chroma SDK bridge for Wine\","
-        "\"author\":{\"name\":\"sinodragon\",\"contact\":\"\"},"
-        "\"device_supported\":[\"keyboard\"],"
-        "\"category\":\"application\"}";
-    if (http_request("POST", "/razer/chromasdk", app_info, reply, sizeof(reply))) {
-        adopt_session_uri(reply);
-        shim_log("registered, session path %s", g_session[0] ? g_session : "(default)");
-    } else {
-        shim_log("no Chroma server on %s:%d -- frames will be dropped until one appears", g_host,
-                 g_port);
+    if (!resolve_server()) {
+        shim_log("cannot resolve %s:%d; lighting will not be forwarded", g_host, g_port);
+        WSACleanup();
+        return 0;
     }
 
+    BOOL registered = FALSE;
     DWORD last_heartbeat = GetTickCount();
+    DWORD last_report = last_heartbeat;
+    LONG reported_frames = 0;
+    LONG reported_unhandled = -1;
+    LONG reported_calls[CALL_KIND_COUNT] = {0};
+
     while (InterlockedCompareExchange(&g_running, 1, 1) == 1) {
         // A 1 s wait doubles as the heartbeat tick when no frames arrive.
         WaitForSingleObject(g_frame_event, 1000);
+
+        // A game opens and closes its session more than once -- Dead Cells does
+        // it on every death and reload -- so follow the flag rather than tying
+        // the session to this thread's lifetime.
+        const BOOL active = InterlockedCompareExchange(&g_session_active, 0, 0) == 1;
+        if (active && !registered) {
+            char reply[1024];
+            const char* app_info =
+                "{\"title\":\"sinodragon-chroma-shim\","
+                "\"description\":\"Chroma SDK bridge for Wine\","
+                "\"author\":{\"name\":\"sinodragon\",\"contact\":\"\"},"
+                "\"device_supported\":[\"keyboard\"],"
+                "\"category\":\"application\"}";
+            if (http_request("POST", "/razer/chromasdk", app_info, reply, sizeof(reply))) {
+                adopt_session_uri(reply);
+                shim_log("registered, session path %s", g_session[0] ? g_session : "(default)");
+                registered = TRUE;
+            } else {
+                shim_log("no Chroma server on %s:%d -- retrying", g_host, g_port);
+            }
+        } else if (!active && registered) {
+            if (g_session[0] != '\0') {
+                http_request("DELETE", g_session, NULL, NULL, 0);
+            }
+            g_session[0] = '\0';
+            registered = FALSE;
+            shim_log("session closed");
+        }
+        if (!active) {
+            continue;  // Nothing to send between UnInit and the next Init.
+        }
 
         COLORREF grid[KB_ROWS][KB_COLS];
         BOOL have_frame = FALSE;
@@ -356,48 +414,82 @@ static DWORD WINAPI worker_main(LPVOID unused) {
             http_request("POST", path, "{}", NULL, 0);
             last_heartbeat = now;
         }
+
+        // Report what the game has been asking for. Done here rather than in
+        // the exported functions so no game thread ever touches the log.
+        if (g_verbose || now - last_report >= 5000) {
+            const LONG in = InterlockedCompareExchange(&g_frames_in, 0, 0);
+            const LONG sent = InterlockedCompareExchange(&g_frames_sent, 0, 0);
+            if (in != reported_frames) {
+                shim_log("%ld frames from the game, %ld forwarded", in, sent);
+                reported_frames = in;
+            }
+            const LONG unhandled = InterlockedCompareExchange(&g_unhandled_effect, -1, -1);
+            if (unhandled != reported_unhandled) {
+                shim_log("keyboard effect type %ld carries no frame; ignoring it", unhandled);
+                reported_unhandled = unhandled;
+            }
+            for (int kind = 0; kind < CALL_KIND_COUNT; ++kind) {
+                const LONG calls = InterlockedCompareExchange(&g_calls[kind], 0, 0);
+                if (calls != reported_calls[kind]) {
+                    shim_log("%s: %ld calls (not forwarded)", kCallNames[kind], calls);
+                    reported_calls[kind] = calls;
+                }
+            }
+            last_report = now;
+        }
     }
 
-    if (g_session[0] != '\0') {
+    if (registered && g_session[0] != '\0') {
         http_request("DELETE", g_session, NULL, NULL, 0);
     }
     WSACleanup();
     return 0;
 }
 
-static void start_worker(void) {
-    if (InterlockedCompareExchange(&g_running, 1, 0) != 0) {
-        return;  // Already running.
+// Starts the worker on the first Init and marks the session live. Later Inits
+// only flip the flag -- the thread is created once for the life of the process.
+static void begin_session(void) {
+    if (InterlockedCompareExchange(&g_running, 1, 0) == 0) {
+        // Create the event before the thread, so a frame arriving immediately
+        // has something to signal.
+        g_frame_event = CreateEventA(NULL, FALSE, FALSE, NULL);
+        g_worker = CreateThread(NULL, 0, worker_main, NULL, 0, NULL);
+        if (g_worker == NULL) {
+            InterlockedExchange(&g_running, 0);
+            shim_log("could not start the worker thread");
+            return;
+        }
     }
-    g_frame_event = CreateEventA(NULL, FALSE, FALSE, NULL);
-    g_worker = CreateThread(NULL, 0, worker_main, NULL, 0, NULL);
-    if (g_worker == NULL) {
-        InterlockedExchange(&g_running, 0);
-        shim_log("could not start the worker thread");
-    }
+    InterlockedExchange(&g_session_active, 1);
 }
 
-static void stop_worker(void) {
-    if (InterlockedCompareExchange(&g_running, 0, 1) != 1) {
-        return;
-    }
+// Asks the worker to finish without waiting for it. Safe from anywhere.
+static void signal_worker_stop(void) {
+    InterlockedCompareExchange(&g_running, 0, 1);
     if (g_frame_event != NULL) {
         SetEvent(g_frame_event);
     }
-    if (g_worker != NULL) {
-        WaitForSingleObject(g_worker, 3000);
-        CloseHandle(g_worker);
-        g_worker = NULL;
-    }
+}
+
+// Closes the session without touching the worker, which lives as long as the
+// process does. This is what UnInit calls, and it must not block: a game calls
+// UnInit from its own thread at moments that matter -- Dead Cells does it when
+// you die and the run reloads -- and joining a thread there stalls the game for
+// as long as the worker takes to notice, which is a visible freeze.
+static void end_session(void) {
+    InterlockedExchange(&g_session_active, 0);
     if (g_frame_event != NULL) {
-        CloseHandle(g_frame_event);
-        g_frame_event = NULL;
+        SetEvent(g_frame_event);  // Let the worker post the DELETE promptly.
     }
 }
 
 // Replaces whatever the worker had not sent yet. Dropping the previous frame is
 // deliberate -- see the note at the top of the file.
 static void submit_frame(COLORREF grid[KB_ROWS][KB_COLS]) {
+    if (InterlockedCompareExchange(&g_session_active, 0, 0) != 1) {
+        return;  // Between UnInit and the next Init.
+    }
     EnterCriticalSection(&g_lock);
     memcpy(g_frame, grid, sizeof(g_frame));
     g_frame_pending = TRUE;
@@ -407,12 +499,7 @@ static void submit_frame(COLORREF grid[KB_ROWS][KB_COLS]) {
         SetEvent(g_frame_event);
     }
 
-    const LONG count = InterlockedIncrement(&g_frames_in);
-    if (g_verbose) {
-        shim_log("frame %ld", count);
-    } else if (count == 1 || (count % 300) == 0) {
-        shim_log("frame %ld (%ld forwarded)", count, InterlockedCompareExchange(&g_frames_sent, 0, 0));
-    }
+    InterlockedIncrement(&g_frames_in);  // The worker reports; see g_calls.
 }
 
 static void fill_uniform(COLORREF grid[KB_ROWS][KB_COLS], COLORREF color) {
@@ -427,14 +514,14 @@ static void fill_uniform(COLORREF grid[KB_ROWS][KB_COLS], COLORREF color) {
 
 __declspec(dllexport) RZRESULT Init(void) {
     shim_log("Init");
-    start_worker();
+    begin_session();
     return RZRESULT_SUCCESS;
 }
 
 __declspec(dllexport) RZRESULT InitSDK(void* app_info) {
     (void)app_info;
     shim_log("InitSDK");
-    start_worker();
+    begin_session();
     return RZRESULT_SUCCESS;
 }
 
@@ -442,7 +529,7 @@ __declspec(dllexport) RZRESULT UnInit(void) {
     shim_log("UnInit (%ld frames in, %ld forwarded)",
              InterlockedCompareExchange(&g_frames_in, 0, 0),
              InterlockedCompareExchange(&g_frames_sent, 0, 0));
-    stop_worker();
+    end_session();  // Returns at once; see the note on end_session.
     return RZRESULT_SUCCESS;
 }
 
@@ -489,9 +576,9 @@ __declspec(dllexport) RZRESULT CreateKeyboardEffect(int effect, void* param, RZE
         }
         default: {
             // Breathing, wave, spectrum cycling and friends are whole-device
-            // animations with no frame to forward. Logged so it is obvious when
-            // a game only ever asks for these.
-            shim_log("CreateKeyboardEffect: unhandled effect type %d", effect);
+            // animations with no frame to forward. Recorded so it is obvious
+            // when a game only ever asks for these.
+            InterlockedExchange(&g_unhandled_effect, (LONG)effect);
             return RZRESULT_SUCCESS;
         }
     }
@@ -505,8 +592,8 @@ __declspec(dllexport) RZRESULT CreateEffect(RZDEVICEID device_id, int effect, vo
     if (effect_id != NULL) {
         memset(effect_id, 0, sizeof(*effect_id));
     }
-    shim_log("CreateEffect: device %08lx-%04x-%04x effect %d",
-             (unsigned long)device_id.Data1, device_id.Data2, device_id.Data3, effect);
+    (void)device_id;
+    InterlockedIncrement(&g_calls[CALL_GENERIC]);
 
     // The generic entry point carries the same 6x22 grid for a keyboard, but
     // the device GUID is the only clue about which device it is for, and
@@ -526,7 +613,8 @@ __declspec(dllexport) RZRESULT CreateMouseEffect(int effect, void* param, RZEFFE
     if (effect_id != NULL) {
         memset(effect_id, 0, sizeof(*effect_id));
     }
-    shim_log("CreateMouseEffect: effect %d", effect);
+    (void)effect;
+    InterlockedIncrement(&g_calls[CALL_MOUSE]);
     return RZRESULT_SUCCESS;
 }
 
@@ -535,7 +623,8 @@ __declspec(dllexport) RZRESULT CreateHeadsetEffect(int effect, void* param, RZEF
     if (effect_id != NULL) {
         memset(effect_id, 0, sizeof(*effect_id));
     }
-    shim_log("CreateHeadsetEffect: effect %d", effect);
+    (void)effect;
+    InterlockedIncrement(&g_calls[CALL_HEADSET]);
     return RZRESULT_SUCCESS;
 }
 
@@ -544,7 +633,8 @@ __declspec(dllexport) RZRESULT CreateMousepadEffect(int effect, void* param, RZE
     if (effect_id != NULL) {
         memset(effect_id, 0, sizeof(*effect_id));
     }
-    shim_log("CreateMousepadEffect: effect %d", effect);
+    (void)effect;
+    InterlockedIncrement(&g_calls[CALL_MOUSEPAD]);
     return RZRESULT_SUCCESS;
 }
 
@@ -553,7 +643,8 @@ __declspec(dllexport) RZRESULT CreateKeypadEffect(int effect, void* param, RZEFF
     if (effect_id != NULL) {
         memset(effect_id, 0, sizeof(*effect_id));
     }
-    shim_log("CreateKeypadEffect: effect %d", effect);
+    (void)effect;
+    InterlockedIncrement(&g_calls[CALL_KEYPAD]);
     return RZRESULT_SUCCESS;
 }
 
@@ -563,7 +654,8 @@ __declspec(dllexport) RZRESULT CreateChromaLinkEffect(int effect, void* param,
     if (effect_id != NULL) {
         memset(effect_id, 0, sizeof(*effect_id));
     }
-    shim_log("CreateChromaLinkEffect: effect %d", effect);
+    (void)effect;
+    InterlockedIncrement(&g_calls[CALL_CHROMALINK]);
     return RZRESULT_SUCCESS;
 }
 
@@ -616,8 +708,12 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
             // lock, and a worker started from it cannot run until we return.
             break;
         case DLL_PROCESS_DETACH:
-            stop_worker();
-            DeleteCriticalSection(&g_lock);
+            // Signal only. Joining here would deadlock (see stop_worker), and
+            // the critical section is left alone because the worker may still
+            // be inside it -- a few leaked bytes on unload beats a hang, and on
+            // process exit none of it matters anyway.
+            InterlockedExchange(&g_session_active, 0);
+            signal_worker_stop();
             break;
         default:
             break;

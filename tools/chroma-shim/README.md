@@ -149,6 +149,14 @@ stack send an RST rather than a FIN, so the server's write failed. Rebuild the
 DLL. `chroma_mock_server.py` also tolerates it now, so an older shim no longer
 produces a traceback per frame.
 
+**The game freezes at a moment that closes the lighting session** (a death, a
+reload, a level transition). Fixed by making the worker thread live for the
+process rather than for one session: `UnInit` used to join it, on the game's
+own thread, which stalled the game for as long as the worker took to notice.
+`Init` and `UnInit` now only flip a flag and return at once. `chroma_test.exe`
+times three close/reopen cycles and fails if any call holds the caller for more
+than 100 ms.
+
 **Heartbeats but no frames.** Registration succeeded and the game is holding
 the session open, but it is not drawing. Most games only light up during play,
 not in menus, and many ship with Chroma off by default. Check the shim's own
@@ -166,6 +174,15 @@ Read from the environment at load time:
 | `SINODRAGON_CHROMA_PORT` | `54235` | REST server port |
 | `SINODRAGON_CHROMA_LOG` | — | Log file; stderr when unset |
 | `SINODRAGON_CHROMA_VERBOSE` | `0` | `1` logs every frame instead of every 300th |
+
+## What a game actually sends
+
+Dead Cells, mid-run, sends `CHROMA_CUSTOM` grids at roughly 15 Hz: a `#FF005A`
+background with a green bar along row 1 (the number row) whose length tracks
+health. So the semantic state is there, but only as pixels -- the count of lit
+cells in that row is the health reading, and there is no other channel carrying
+it. That is the shape of every Chroma integration, and the reason a sink layer
+composites frames rather than interpreting them.
 
 ## What it forwards
 
