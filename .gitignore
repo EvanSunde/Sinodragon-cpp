@@ -1,5 +1,6 @@
 build/
 build-*/
 
-# Built shim DLLs
+# Built shim DLL and test harness
 tools/chroma-shim/*.dll
+tools/chroma-shim/*.exe

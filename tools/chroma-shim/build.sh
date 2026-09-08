@@ -16,3 +16,10 @@ OUT=${OUT:-RzChromaSDK64.dll}
     -Wl,--enable-stdcall-fixup
 
 echo "built $OUT"
+
+# The test harness: drives the shim the way a game does. Razer's own sample
+# application cannot -- see README.
+if [ "${SKIP_HARNESS:-0}" != "1" ]; then
+    "$CC" -O2 -Wall -Wextra -o chroma_test.exe test_harness.c
+    echo "built chroma_test.exe"
+fi

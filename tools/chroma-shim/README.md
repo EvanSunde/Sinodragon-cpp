@@ -53,7 +53,8 @@ CC=i686-w64-mingw32-gcc OUT=RzChromaSDK.dll ./build.sh
 ## Install
 
 Drop the DLL next to the game's executable — the application directory comes
-first in the Windows search order, so nothing else is required:
+first in the Windows search order, so nothing else is required. (This is the
+step Razer's sample application rejects; see above. Games do not.)
 
 ```bash
 cp RzChromaSDK64.dll "$GAME_DIR/"
@@ -72,6 +73,60 @@ For a Steam game, set the launch options to:
 ```
 WINEDLLOVERRIDES="RzChromaSDK64=n" %command%
 ```
+
+## Test it without a game
+
+`build.sh` also produces `chroma_test.exe`, which drives the shim exactly as a
+game does -- `LoadLibrary`, `GetProcAddress`, `Init`, a static frame, a marked
+grid, then 120 frames at ~60 Hz:
+
+```bash
+python3 chroma_mock_server.py &
+cp RzChromaSDK64.dll chroma_test.exe /tmp/chromatest/ && cd /tmp/chromatest
+wine chroma_test.exe
+```
+
+The marked grid puts pure red, green and blue in the first three cells, so a
+transposed grid or a BGR/RGB swap shows up immediately instead of looking
+plausible. The frame burst reports its own rate; well under 60 fps means
+something on the send path is blocking the caller.
+
+### Why not Razer's sample application
+
+`RazerChromaSampleApplication.exe` looks like the obvious test harness and is
+useless as one. Before it resolves a single export it requires all of:
+
+1. The loaded DLL's path (via `GetModuleFileNameExW`) to equal
+   `%SystemRoot%\System32\RzChromaSDK64.dll` or
+   `%ProgramFiles%\Razer Chroma SDK\bin\RzChromaSDK64.dll` -- a DLL beside
+   the .exe is rejected.
+2. `WinVerifyTrust(WINTRUST_ACTION_GENERIC_VERIFY_V2)` to pass on it, i.e. a
+   valid Authenticode signature.
+3. `HKLM\SOFTWARE\RAZER CHROMA SDK\InstallPath` to name an `RzSDKService.exe`
+   whose signer matches the DLL's.
+
+Only then does it `GetProcAddress` for `InitSDK`, `CreateEffect`,
+`CreateKeyboardEffect`, `CreateMouseEffect`, `CreateMousepadEffect`,
+`CreateKeypadEffect`, `CreateHeadsetEffect`, `CreateChromaLinkEffect`,
+`SetEffect` and `DeleteEffect`, and call `InitSDK`.
+
+A replacement DLL fails 1 and 2, so the app unloads it without calling
+anything -- which is what a `LoadLibraryW` immediately followed by
+`FreeLibrary`, with no `GetProcAddress` between them, means in a relay log.
+The stock Razer DLL is rejected the same way when it is not installed in one
+of those two directories.
+
+This is the sample application demonstrating Razer's recommended "check the
+SDK is genuine" pattern. Games have no reason to do it, but it is worth
+confirming for a specific title before assuming the shim will be used:
+
+```bash
+objdump -p Game.exe | grep -i wintrust
+strings -el Game.exe | grep -iE 'Razer Chroma SDK.bin|System32.RzChroma'
+```
+
+Anything found there means that game validates the SDK too, and the shim will
+not be loaded by it.
 
 ## Run
 
