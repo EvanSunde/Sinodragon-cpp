@@ -1,2 +1,5 @@
 build/
 build-*/
+
+# Built shim DLLs
+tools/chroma-shim/*.dll
