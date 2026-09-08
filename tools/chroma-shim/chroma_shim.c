@@ -215,18 +215,27 @@ static BOOL http_request(const char* method, const char* path, const char* body,
         ok = send_all(sock, body, body_length);
     }
 
-    if (ok && reply != NULL && reply_size > 0) {
-        size_t total = 0;
-        while (total + 1 < reply_size) {
-            const int n = recv(sock, reply + total, (int)(reply_size - total - 1), 0);
-            if (n <= 0) {
-                break;
-            }
+    // Always drain the reply, even when the caller does not want it. Closing a
+    // socket that still has unread data makes the stack send an RST rather than
+    // a FIN, and the server then fails to write its response -- which shows up
+    // at the far end as a broken pipe on every heartbeat and every frame.
+    char discard[512];
+    size_t total = 0;
+    for (;;) {
+        const BOOL keeping = (reply != NULL) && (total + 1 < reply_size);
+        char* const dst = keeping ? reply + total : discard;
+        const size_t capacity = keeping ? (reply_size - total - 1) : sizeof(discard);
+
+        const int n = recv(sock, dst, (int)capacity, 0);
+        if (n <= 0) {
+            break;  // 0 is the orderly close we asked for with Connection: close.
+        }
+        if (keeping) {
             total += (size_t)n;
         }
+    }
+    if (reply != NULL && reply_size > 0) {
         reply[total] = '\0';
-    } else if (reply != NULL && reply_size > 0) {
-        reply[0] = '\0';
     }
 
     closesocket(sock);

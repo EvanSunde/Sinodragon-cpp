@@ -140,6 +140,22 @@ wine "$GAME_DIR/Game.exe"
 
 Enable the game's Chroma option in its own settings; most ship with it off.
 
+## Troubleshooting
+
+**`BrokenPipeError` on the server, once per heartbeat and per frame.** Fixed in
+the shim as of the drain-the-reply change: it used to close each connection
+without reading the response, and a socket closed with unread data makes the
+stack send an RST rather than a FIN, so the server's write failed. Rebuild the
+DLL. `chroma_mock_server.py` also tolerates it now, so an older shim no longer
+produces a traceback per frame.
+
+**Heartbeats but no frames.** Registration succeeded and the game is holding
+the session open, but it is not drawing. Most games only light up during play,
+not in menus, and many ship with Chroma off by default. Check the shim's own
+log (stderr, or `SINODRAGON_CHROMA_LOG`) — it reports frame counts, and logs
+every effect type it cannot forward, so a game asking only for `CHROMA_WAVE`
+or lighting a device other than the keyboard is visible there.
+
 ## Configuration
 
 Read from the environment at load time:

@@ -22,13 +22,15 @@ Usage:
 """
 
 import json
-import uuid
+import sys
 import threading
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime
 
 HOST = "127.0.0.1"
 PORT = 54235  # standard Razer Chroma SDK REST port
+VERBOSE = "-v" in sys.argv or "--verbose" in sys.argv
 
 SESSIONS = {}
 lock = threading.Lock()
@@ -42,6 +44,37 @@ def log(tag, data=None):
             print(json.dumps(data, indent=2))
         except TypeError:
             print(data)
+
+
+FRAMES = 0
+
+
+def summarise_grid(param):
+    """One line for a 6x22 colour grid: how much of it is lit, and in what."""
+    flat = [c for row in param for c in row] if param and isinstance(param[0], list) else list(param)
+    lit = [c for c in flat if c]
+    if not lit:
+        return f"{len(flat)} keys, all dark"
+    # COLORREF is BGR, not RGB.
+    avg_r = sum(c & 0xFF for c in lit) // len(lit)
+    avg_g = sum((c >> 8) & 0xFF for c in lit) // len(lit)
+    avg_b = sum((c >> 16) & 0xFF for c in lit) // len(lit)
+    distinct = len(set(lit))
+    return (f"{len(lit)}/{len(flat)} keys lit, {distinct} distinct, "
+            f"mean #{avg_r:02x}{avg_g:02x}{avg_b:02x}")
+
+
+def log_effect(tag, body):
+    """Effects arrive at frame rate, so summarise unless asked not to."""
+    global FRAMES
+    FRAMES += 1
+    param = body.get("param") if isinstance(body, dict) else None
+    if VERBOSE or not isinstance(param, list):
+        log(tag, body)
+        return
+    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    effect = body.get("effect", "?")
+    print(f"[{ts}] #{FRAMES} {effect}: {summarise_grid(param)}")
 
 
 class ChromaHandler(BaseHTTPRequestHandler):
@@ -88,7 +121,7 @@ class ChromaHandler(BaseHTTPRequestHandler):
         # Effect creation on a device endpoint (keyboard/mouse/mousepad/headset/keypad/chromalink)
         if len(parts) >= 4:
             device = parts[3]
-            log(f"EFFECT create device={device} session={parts[2]}", body)
+            log_effect(f"EFFECT create device={device} session={parts[2]}", body)
             self._send_json(200, {"result": 0, "effectId": str(uuid.uuid4())})
             return
 
@@ -97,7 +130,7 @@ class ChromaHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         body = self._read_json()
-        log(f"PUT {self.path}", body)
+        log_effect(f"PUT {self.path}", body)
         self._send_json(200, {"result": 0, "effectId": str(uuid.uuid4())})
 
     def do_DELETE(self):
@@ -108,12 +141,23 @@ class ChromaHandler(BaseHTTPRequestHandler):
         log(f"UNREGISTER {self.path}")
         self._send_json(200, {"result": 0})
 
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            # A client that sends a request and closes without reading the
+            # reply is rude but not our problem, and a traceback per frame
+            # buries the data we are here to look at.
+            self.close_connection = True
+
     def log_message(self, fmt, *args):
         pass  # silence default stderr access logging
 
 
 if __name__ == "__main__":
     print(f"Mock Razer Chroma SDK REST server on http://{HOST}:{PORT}")
+    if not VERBOSE:
+        print("Effects are summarised one per line; pass -v for the full grids.")
     print("Launch the game now (with Chroma enabled in its settings) and watch below.\n")
     server = ThreadingHTTPServer((HOST, PORT), ChromaHandler)
     try:
