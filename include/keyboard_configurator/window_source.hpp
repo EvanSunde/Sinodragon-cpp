@@ -13,8 +13,8 @@ struct WindowInfo {
 };
 
 // A source of "the focused window changed" events. Backends exist for
-// Hyprland, sway/i3 and X11; which one runs is decided by the environment
-// unless the config names one.
+// Hyprland, niri, sway/i3 and X11; which one runs is decided by the
+// environment unless the config names one.
 class WindowSource {
 public:
     using Callback = std::function<void(const WindowInfo&)>;
@@ -30,6 +30,7 @@ public:
 
 // True when this backend's compositor appears to be the one running.
 [[nodiscard]] bool hyprlandAvailable();
+[[nodiscard]] bool niriAvailable();
 [[nodiscard]] bool swayAvailable();
 [[nodiscard]] bool x11Available();
 
