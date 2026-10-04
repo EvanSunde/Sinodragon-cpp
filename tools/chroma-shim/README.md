@@ -172,12 +172,40 @@ own thread, which stalled the game for as long as the worker took to notice.
 times three close/reopen cycles and fails if any call holds the caller for more
 than 100 ms.
 
+**The keyboard briefly shows your normal profile when you die.** A game that
+closes and reopens its Chroma session (Dead Cells does it on every death) no
+longer lets the profile flash through: the daemon holds the takeover for two
+seconds after a game unregisters, so quitting hands back after two seconds and
+a reload in between never does.
+
 **Heartbeats but no frames.** Registration succeeded and the game is holding
 the session open, but it is not drawing. Most games only light up during play,
 not in menus, and many ship with Chroma off by default. Check the shim's own
 log (stderr, or `SINODRAGON_CHROMA_LOG`) — it reports frame counts, and logs
 every effect type it cannot forward, so a game asking only for `CHROMA_WAVE`
 or lighting a device other than the keyboard is visible there.
+
+### Reading the shim's log under Steam
+
+There is no terminal under Steam, so send the log to a file. Use a `Z:\` path
+-- Wine maps `Z:` to `/` -- since a bare `/tmp/...` is resolved against
+whatever drive the game started on. In the game's launch options:
+
+```
+SINODRAGON_CHROMA_LOG='Z:\tmp\chroma-shim.log' %command%
+```
+
+Every five seconds it reports how the game drives the SDK:
+
+```
+keyboard: 812 shown at once, 40 created for later, 315 shown by SetEffect, 0 SetEffect on unknown ids
+CreateEffect for device {2EA1BB63-...} (a keyboard: forwarded)
+keyboard effect type 6 carries no frame; ignoring it
+```
+
+A large "SetEffect on unknown ids" means the game keeps more pre-built effects
+than the shim holds; a "not a known keyboard" GUID that is in fact a keyboard
+belongs in `kKeyboardGuids` in `chroma_shim.c`.
 
 ## Configuration
 
@@ -198,6 +226,23 @@ health. So the semantic state is there, but only as pixels -- the count of lit
 cells in that row is the health reading, and there is no other channel carrying
 it. That is the shape of every Chroma integration, and the reason the daemon's
 `chroma` layer composites frames rather than interpreting them.
+
+## Two ways a game shows an effect
+
+`CreateKeyboardEffect(type, param, NULL)` shows the effect immediately. With
+an id instead of NULL it only *builds* the effect, and the game shows it later
+with `SetEffect(id)` -- that is how games pre-build ambient lighting and flash
+animations at level load and switch between them. The shim holds effects
+created with an id (up to 4096 outstanding) and shows them only when
+`SetEffect` names them; `DeleteEffect` frees one.
+
+Earlier versions showed those effects the moment they were built and ignored
+`SetEffect`, which in Dead Cells meant a stray flash of some pre-built effect
+during loading and the biome lighting never appearing when it was switched to.
+
+The generic `CreateEffect` takes a device GUID, and only known Razer keyboard
+GUIDs are forwarded -- a mouse's grid is a fraction of a keyboard's, and
+reading it as one painted garbage on the keys.
 
 ## What it forwards
 

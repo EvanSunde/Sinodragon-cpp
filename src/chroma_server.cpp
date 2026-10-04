@@ -27,6 +27,10 @@ constexpr std::size_t kMaxConnections = 32;
 constexpr std::size_t kMaxSessions = 64;
 constexpr std::size_t kMaxStoredEffects = 512;
 constexpr auto kIdleConnection = std::chrono::seconds(30);
+// How long an unregistered app keeps the keyboard, in case it is about to
+// register again. Long enough to cover a game's death-and-reload; short enough
+// that quitting hands the keyboard back promptly.
+constexpr auto kReleaseGrace = std::chrono::seconds(2);
 
 // RZRESULT values the REST API reports in its "result" field.
 constexpr int kResultSuccess = 0;
@@ -602,6 +606,9 @@ int ChromaServer::pollTimeoutMs(Clock::time_point now) const {
     auto soonest = Clock::time_point::max();
     for (const auto& [id, session] : sessions_) {
         soonest = std::min(soonest, session.last_seen + session_timeout_);
+        if (session.release_at) {
+            soonest = std::min(soonest, *session.release_at);
+        }
     }
     for (const auto& connection : connections_) {
         soonest = std::min(soonest, connection.last_active + kIdleConnection);
@@ -793,8 +800,14 @@ ChromaServer::Reply ChromaServer::handle(const Request& request, Clock::time_poi
 
     if (next == parts.size()) {
         if (method == "DELETE") {
-            sessions_.erase(session);
-            updateActivity();
+            auto it = sessions_.find(session);
+            if (it != sessions_.end() && it->second.sent_frame) {
+                // Linger instead of releasing now; see Session::release_at.
+                it->second.release_at = now + std::min<Clock::duration>(kReleaseGrace, session_timeout_);
+            } else {
+                sessions_.erase(session);
+                updateActivity();
+            }
         }
         return {200, result(kResultSuccess)};
     }
@@ -949,13 +962,17 @@ ChromaServer::Session& ChromaServer::touch(const std::string& session, Clock::ti
         state_->setSessions(sessions_.size());
     }
     it->second.last_seen = now;
+    it->second.release_at.reset();  // Still in use after all.
     return it->second;
 }
 
 void ChromaServer::expire(Clock::time_point now) {
     bool changed = false;
     for (auto it = sessions_.begin(); it != sessions_.end();) {
-        if (now - it->second.last_seen > session_timeout_) {
+        if (it->second.release_at && now >= *it->second.release_at) {
+            it = sessions_.erase(it);
+            changed = true;
+        } else if (now - it->second.last_seen > session_timeout_) {
             std::cout << "[Chroma] " << it->second.title << " went quiet; releasing it.\n";
             it = sessions_.erase(it);
             changed = true;

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -58,6 +59,8 @@ public:
         std::string body;
     };
     Reply handleForTest(const std::string& method, const std::string& path, const std::string& body);
+    // Exposed for tests: what the loop does on each wakeup, without the loop.
+    void expireForTest() { expire(Clock::now()); }
 
 private:
     using Clock = std::chrono::steady_clock;
@@ -66,6 +69,10 @@ private:
         std::string title;
         Clock::time_point last_seen{};
         bool sent_frame{false};
+        // Set when the app unregisters: the session lingers until then, so an
+        // app that closes and reopens its session -- Dead Cells does on every
+        // death -- does not hand the keyboard back for a split second between.
+        std::optional<Clock::time_point> release_at;
     };
 
     struct Connection {

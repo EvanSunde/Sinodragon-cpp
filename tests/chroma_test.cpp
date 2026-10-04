@@ -6,6 +6,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "keyboard_configurator/chroma_preset.hpp"
 #include "keyboard_configurator/chroma_server.hpp"
@@ -201,9 +202,35 @@ int main(int argc, char** argv) {
     check(reply.status == 400, "deeply nested JSON is rejected rather than recursed into");
 
     server.handleForTest("DELETE", base, "");
-    check(idles == 0, "one app leaving while another is live keeps the takeover");
     server.handleForTest("DELETE", "/razer/chromasdk/424242", "");
-    check(idles == 1 && state->grid(got) == 0, "the last app leaving fires on_idle and clears the frame");
+    server.expireForTest();
+    check(idles == 0, "unregistering does not hand the keyboard back at once");
+
+    // A game closing and reopening its session -- what Dead Cells does on
+    // every death -- must not let the profile flash through in between.
+    {
+        auto churn_state = std::make_shared<ChromaState>();
+        int churn_idles = 0;
+        ChromaServer::Callbacks cb;
+        cb.on_idle = [&] { ++churn_idles; };
+        ChromaServer churn(churn_state, 54299, std::chrono::milliseconds(300), cb);
+        const std::string frame = R"({"effect":"CHROMA_STATIC","param":{"color":255}})";
+
+        churn.handleForTest("PUT", "/razer/chromasdk/1/keyboard", frame);
+        churn.handleForTest("DELETE", "/razer/chromasdk/1", "");
+        churn.handleForTest("PUT", "/razer/chromasdk/2/keyboard", frame);  // Re-registered.
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        churn.expireForTest();
+        check(churn_idles == 0, "close-and-reopen within the grace keeps the takeover");
+
+        churn.handleForTest("DELETE", "/razer/chromasdk/2", "");
+        churn.expireForTest();
+        check(churn_idles == 0, "a quit is not released before the grace runs out");
+        std::this_thread::sleep_for(std::chrono::milliseconds(350));
+        churn.expireForTest();
+        check(churn_idles == 1 && churn_state->grid(got) == 0,
+              "after the grace, the last app leaving fires on_idle and clears the frame");
+    }
 
     std::cout << (failures == 0 ? "\nall passed\n" : "\nFAILURES: " + std::to_string(failures) + "\n");
     return failures == 0 ? 0 : 1;

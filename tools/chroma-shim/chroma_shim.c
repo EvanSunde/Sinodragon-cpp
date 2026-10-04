@@ -337,6 +337,8 @@ static void post_frame(COLORREF grid[KB_ROWS][KB_COLS]) {
     }
 }
 
+static void report_progress(void);  // Below, next to what it reports.
+
 static DWORD WINAPI worker_main(LPVOID unused) {
     (void)unused;
 
@@ -354,9 +356,6 @@ static DWORD WINAPI worker_main(LPVOID unused) {
     BOOL registered = FALSE;
     DWORD last_heartbeat = GetTickCount();
     DWORD last_report = last_heartbeat;
-    LONG reported_frames = 0;
-    LONG reported_unhandled = -1;
-    LONG reported_calls[CALL_KIND_COUNT] = {0};
 
     while (InterlockedCompareExchange(&g_running, 1, 1) == 1) {
         // A 1 s wait doubles as the heartbeat tick when no frames arrive.
@@ -418,24 +417,7 @@ static DWORD WINAPI worker_main(LPVOID unused) {
         // Report what the game has been asking for. Done here rather than in
         // the exported functions so no game thread ever touches the log.
         if (g_verbose || now - last_report >= 5000) {
-            const LONG in = InterlockedCompareExchange(&g_frames_in, 0, 0);
-            const LONG sent = InterlockedCompareExchange(&g_frames_sent, 0, 0);
-            if (in != reported_frames) {
-                shim_log("%ld frames from the game, %ld forwarded", in, sent);
-                reported_frames = in;
-            }
-            const LONG unhandled = InterlockedCompareExchange(&g_unhandled_effect, -1, -1);
-            if (unhandled != reported_unhandled) {
-                shim_log("keyboard effect type %ld carries no frame; ignoring it", unhandled);
-                reported_unhandled = unhandled;
-            }
-            for (int kind = 0; kind < CALL_KIND_COUNT; ++kind) {
-                const LONG calls = InterlockedCompareExchange(&g_calls[kind], 0, 0);
-                if (calls != reported_calls[kind]) {
-                    shim_log("%s: %ld calls (not forwarded)", kCallNames[kind], calls);
-                    reported_calls[kind] = calls;
-                }
-            }
+            report_progress();
             last_report = now;
         }
     }
@@ -502,6 +484,188 @@ static void submit_frame(COLORREF grid[KB_ROWS][KB_COLS]) {
     InterlockedIncrement(&g_frames_in);  // The worker reports; see g_calls.
 }
 
+// --------------------------------------------------------- created effects
+//
+// The SDK has two ways to show an effect. Create*Effect with a NULL id shows
+// it now. With an id it only builds it, and the game shows it later with
+// SetEffect -- which is how games pre-build their ambient lighting and flash
+// animations at load and switch between them. So an effect created with an id
+// is stored here, not shown, until SetEffect names it.
+//
+// A ring of slots, each id carrying its slot and a generation: no hashing, and
+// an id whose slot has since been reused or deleted simply stops matching.
+// Games that build animations create and delete effects constantly; 4096
+// outstanding ones is far more than any of them keeps.
+
+#define STORE_SLOTS 4096
+#define ID_NOT_KEYBOARD 0xFFFFFFFFu
+
+typedef struct {
+    DWORD generation;  // 0 = free
+    COLORREF grid[KB_ROWS][KB_COLS];
+} STORED_EFFECT;
+
+static CRITICAL_SECTION g_store_lock;
+static STORED_EFFECT g_store[STORE_SLOTS];
+static DWORD g_store_next = 0;
+static DWORD g_store_generation = 0;
+
+static volatile LONG g_shown_now = 0;      // Created with a NULL id.
+static volatile LONG g_created_later = 0;  // Created with an id, held.
+static volatile LONG g_shown_by_set = 0;   // SetEffect on a held keyboard effect.
+static volatile LONG g_set_unknown = 0;    // SetEffect on an id we do not hold.
+
+// Ids say "sino" in Data4 so a stray GUID is not mistaken for one of ours.
+static void encode_id(RZEFFECTID* id, DWORD slot, DWORD generation) {
+    memset(id, 0, sizeof(*id));
+    id->Data1 = slot;
+    id->Data2 = (WORD)(generation & 0xFFFF);
+    id->Data3 = (WORD)(generation >> 16);
+    id->Data4[0] = 's';
+    id->Data4[1] = 'i';
+    id->Data4[2] = 'n';
+    id->Data4[3] = 'o';
+}
+
+static BOOL decode_id(const RZEFFECTID* id, DWORD* slot, DWORD* generation) {
+    if (id->Data4[0] != 's' || id->Data4[1] != 'i' || id->Data4[2] != 'n' || id->Data4[3] != 'o') {
+        return FALSE;
+    }
+    *slot = id->Data1;
+    *generation = (DWORD)id->Data2 | ((DWORD)id->Data3 << 16);
+    return TRUE;
+}
+
+// Holds a keyboard frame for a later SetEffect and hands back its id.
+static void store_effect(COLORREF grid[KB_ROWS][KB_COLS], RZEFFECTID* id) {
+    EnterCriticalSection(&g_store_lock);
+    const DWORD slot = g_store_next++ % STORE_SLOTS;
+    if (++g_store_generation == 0) {
+        g_store_generation = 1;  // 0 marks a free slot.
+    }
+    g_store[slot].generation = g_store_generation;
+    memcpy(g_store[slot].grid, grid, sizeof(g_store[slot].grid));
+    encode_id(id, slot, g_store_generation);
+    LeaveCriticalSection(&g_store_lock);
+    InterlockedIncrement(&g_created_later);
+}
+
+// An id for something with nothing to show on a keyboard -- another device, or
+// an animated effect type -- so a later SetEffect on it is a quiet no-op.
+static void non_keyboard_id(RZEFFECTID* id) {
+    encode_id(id, ID_NOT_KEYBOARD, 0);
+}
+
+// Shows a frame now, or holds it for SetEffect when the game asked for an id.
+static void show_or_hold(COLORREF grid[KB_ROWS][KB_COLS], RZEFFECTID* effect_id) {
+    if (effect_id != NULL) {
+        store_effect(grid, effect_id);
+        return;
+    }
+    InterlockedIncrement(&g_shown_now);
+    submit_frame(grid);
+}
+
+// Razer keyboards, as CreateEffect names them. The generic CreateEffect works
+// for any device, and a mouse or headset grid is far smaller than a keyboard's
+// 6x22 -- reading one as a keyboard frame both runs off the end of the game's
+// buffer and paints garbage on the keys. So only these are forwarded; any
+// other GUID is logged, and a keyboard missing here can be added from that.
+static const GUID kKeyboardGuids[] = {
+    {0x2EA1BB63, 0xCA28, 0x428D, {0x9F, 0x06, 0x19, 0x6B, 0x88, 0x33, 0x0B, 0xBB}},  // BlackWidow Chroma
+    {0xED1C1B82, 0xBFBE, 0x418F, {0xB4, 0x9D, 0xD0, 0x3F, 0x05, 0xB1, 0x49, 0xDF}},  // BlackWidow Chroma TE
+    {0x18C5AD9B, 0x4326, 0x4828, {0x92, 0xC4, 0x26, 0x69, 0xA6, 0x6D, 0x22, 0x83}},  // DeathStalker Chroma
+    {0x872AB2A9, 0x7959, 0x4478, {0x9F, 0xED, 0x15, 0xF6, 0x18, 0x6E, 0x72, 0xE4}},  // Overwatch keyboard
+    {0x5AF60076, 0xADE9, 0x43D4, {0xB5, 0x74, 0x52, 0x59, 0x92, 0x93, 0xB5, 0x54}},  // BlackWidow X Chroma
+    {0x2D84DD51, 0x3290, 0x4AAC, {0x9A, 0x89, 0xD8, 0xAF, 0xDE, 0x38, 0xB5, 0x7C}},  // BlackWidow X TE Chroma
+    {0x803378C1, 0xCC48, 0x4970, {0x85, 0x39, 0xD8, 0x28, 0xCC, 0x1D, 0x42, 0x0A}},  // Ornata Chroma
+    {0xC83BDFE8, 0xE7FC, 0x40E0, {0x99, 0xDB, 0x87, 0x2E, 0x23, 0xF1, 0x98, 0x91}},  // Blade Stealth
+    {0xF2BEDFAF, 0xA0FE, 0x4651, {0x9D, 0x41, 0xB6, 0xCE, 0x60, 0x3A, 0x3D, 0xDD}},  // Blade
+    {0xA73AC338, 0xF0E5, 0x4BF7, {0x91, 0xAE, 0xDD, 0x1F, 0x7E, 0x17, 0x37, 0xA5}},  // Blade Pro
+};
+
+#define SEEN_GUIDS 16
+static GUID g_seen_guids[SEEN_GUIDS];
+static volatile LONG g_seen_count = 0;
+
+static BOOL is_keyboard_guid(const GUID* id) {
+    for (size_t i = 0; i < sizeof(kKeyboardGuids) / sizeof(kKeyboardGuids[0]); ++i) {
+        if (memcmp(id, &kKeyboardGuids[i], sizeof(GUID)) == 0) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+// Remembers a device GUID a game used, for the worker to log once.
+static void note_device(const GUID* id) {
+    EnterCriticalSection(&g_store_lock);
+    const LONG count = g_seen_count;
+    BOOL known = FALSE;
+    for (LONG i = 0; i < count; ++i) {
+        if (memcmp(&g_seen_guids[i], id, sizeof(GUID)) == 0) {
+            known = TRUE;
+            break;
+        }
+    }
+    if (!known && count < SEEN_GUIDS) {
+        g_seen_guids[count] = *id;
+        InterlockedExchange(&g_seen_count, count + 1);
+    }
+    LeaveCriticalSection(&g_store_lock);
+}
+
+// Turns the counters the exported functions bump into log lines. Called only
+// from the worker, so the log is never written from a game's thread.
+static void report_progress(void) {
+    static LONG reported_frames = 0;
+    static LONG reported_unhandled = -1;
+    static LONG reported_calls[CALL_KIND_COUNT] = {0};
+    static LONG reported_modes = 0;
+    static LONG reported_guids = 0;
+
+    const LONG in = InterlockedCompareExchange(&g_frames_in, 0, 0);
+    const LONG sent = InterlockedCompareExchange(&g_frames_sent, 0, 0);
+    if (in != reported_frames) {
+        shim_log("%ld frames from the game, %ld forwarded", in, sent);
+        reported_frames = in;
+    }
+    const LONG unhandled = InterlockedCompareExchange(&g_unhandled_effect, -1, -1);
+    if (unhandled != reported_unhandled) {
+        shim_log("keyboard effect type %ld carries no frame; ignoring it", unhandled);
+        reported_unhandled = unhandled;
+    }
+    // Which of the SDK's two modes the game uses, and whether its
+    // SetEffect calls find what they name.
+    const LONG now_count = InterlockedCompareExchange(&g_shown_now, 0, 0);
+    const LONG later = InterlockedCompareExchange(&g_created_later, 0, 0);
+    const LONG by_set = InterlockedCompareExchange(&g_shown_by_set, 0, 0);
+    const LONG unknown = InterlockedCompareExchange(&g_set_unknown, 0, 0);
+    if (now_count + later + by_set + unknown != reported_modes) {
+        shim_log("keyboard: %ld shown at once, %ld created for later, %ld shown by SetEffect,"
+                 " %ld SetEffect on unknown ids",
+                 now_count, later, by_set, unknown);
+        reported_modes = now_count + later + by_set + unknown;
+    }
+    const LONG seen = InterlockedCompareExchange(&g_seen_count, 0, 0);
+    for (LONG i = reported_guids; i < seen; ++i) {
+        const GUID* g = &g_seen_guids[i];
+        shim_log("CreateEffect for device {%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}%s",
+                 (unsigned long)g->Data1, g->Data2, g->Data3, g->Data4[0], g->Data4[1],
+                 g->Data4[2], g->Data4[3], g->Data4[4], g->Data4[5], g->Data4[6], g->Data4[7],
+                 is_keyboard_guid(g) ? " (a keyboard: forwarded)" : " (not a known keyboard: ignored)");
+    }
+    reported_guids = seen;
+    for (int kind = 0; kind < CALL_KIND_COUNT; ++kind) {
+        const LONG calls = InterlockedCompareExchange(&g_calls[kind], 0, 0);
+        if (calls != reported_calls[kind]) {
+            shim_log("%s: %ld calls%s", kCallNames[kind], calls,
+                     kind == CALL_GENERIC ? "" : " (not forwarded)");
+            reported_calls[kind] = calls;
+        }
+    }
+}
+
 static void fill_uniform(COLORREF grid[KB_ROWS][KB_COLS], COLORREF color) {
     for (int row = 0; row < KB_ROWS; ++row) {
         for (int col = 0; col < KB_COLS; ++col) {
@@ -534,10 +698,6 @@ __declspec(dllexport) RZRESULT UnInit(void) {
 }
 
 __declspec(dllexport) RZRESULT CreateKeyboardEffect(int effect, void* param, RZEFFECTID* effect_id) {
-    if (effect_id != NULL) {
-        memset(effect_id, 0, sizeof(*effect_id));
-    }
-
     COLORREF grid[KB_ROWS][KB_COLS];
 
     switch (effect) {
@@ -579,31 +739,36 @@ __declspec(dllexport) RZRESULT CreateKeyboardEffect(int effect, void* param, RZE
             // animations with no frame to forward. Recorded so it is obvious
             // when a game only ever asks for these.
             InterlockedExchange(&g_unhandled_effect, (LONG)effect);
+            if (effect_id != NULL) {
+                non_keyboard_id(effect_id);
+            }
             return RZRESULT_SUCCESS;
         }
     }
 
-    submit_frame(grid);
+    show_or_hold(grid, effect_id);
     return RZRESULT_SUCCESS;
 }
 
 __declspec(dllexport) RZRESULT CreateEffect(RZDEVICEID device_id, int effect, void* param,
                                             RZEFFECTID* effect_id) {
-    if (effect_id != NULL) {
-        memset(effect_id, 0, sizeof(*effect_id));
-    }
-    (void)device_id;
     InterlockedIncrement(&g_calls[CALL_GENERIC]);
+    note_device(&device_id);
 
-    // The generic entry point carries the same 6x22 grid for a keyboard, but
-    // the device GUID is the only clue about which device it is for, and
-    // mapping every Razer GUID is not worth it. Forwarding a custom payload
-    // works when the game drives a keyboard and is harmless otherwise, since a
-    // frame for another device just paints one more grid we then overwrite.
-    if (effect == GENERIC_EFFECT_CUSTOM && param != NULL) {
+    // Only a keyboard's payload is a 6x22 grid; see kKeyboardGuids.
+    if (is_keyboard_guid(&device_id) && param != NULL &&
+        (effect == GENERIC_EFFECT_CUSTOM || effect == GENERIC_EFFECT_STATIC)) {
         COLORREF grid[KB_ROWS][KB_COLS];
-        memcpy(grid, param, sizeof(grid));
-        submit_frame(grid);
+        if (effect == GENERIC_EFFECT_CUSTOM) {
+            memcpy(grid, param, sizeof(grid));
+        } else {
+            fill_uniform(grid, ((KB_STATIC_EFFECT*)param)->Color);
+        }
+        show_or_hold(grid, effect_id);
+        return RZRESULT_SUCCESS;
+    }
+    if (effect_id != NULL) {
+        non_keyboard_id(effect_id);
     }
     return RZRESULT_SUCCESS;
 }
@@ -611,7 +776,7 @@ __declspec(dllexport) RZRESULT CreateEffect(RZDEVICEID device_id, int effect, vo
 __declspec(dllexport) RZRESULT CreateMouseEffect(int effect, void* param, RZEFFECTID* effect_id) {
     (void)param;
     if (effect_id != NULL) {
-        memset(effect_id, 0, sizeof(*effect_id));
+        non_keyboard_id(effect_id);
     }
     (void)effect;
     InterlockedIncrement(&g_calls[CALL_MOUSE]);
@@ -621,7 +786,7 @@ __declspec(dllexport) RZRESULT CreateMouseEffect(int effect, void* param, RZEFFE
 __declspec(dllexport) RZRESULT CreateHeadsetEffect(int effect, void* param, RZEFFECTID* effect_id) {
     (void)param;
     if (effect_id != NULL) {
-        memset(effect_id, 0, sizeof(*effect_id));
+        non_keyboard_id(effect_id);
     }
     (void)effect;
     InterlockedIncrement(&g_calls[CALL_HEADSET]);
@@ -631,7 +796,7 @@ __declspec(dllexport) RZRESULT CreateHeadsetEffect(int effect, void* param, RZEF
 __declspec(dllexport) RZRESULT CreateMousepadEffect(int effect, void* param, RZEFFECTID* effect_id) {
     (void)param;
     if (effect_id != NULL) {
-        memset(effect_id, 0, sizeof(*effect_id));
+        non_keyboard_id(effect_id);
     }
     (void)effect;
     InterlockedIncrement(&g_calls[CALL_MOUSEPAD]);
@@ -641,7 +806,7 @@ __declspec(dllexport) RZRESULT CreateMousepadEffect(int effect, void* param, RZE
 __declspec(dllexport) RZRESULT CreateKeypadEffect(int effect, void* param, RZEFFECTID* effect_id) {
     (void)param;
     if (effect_id != NULL) {
-        memset(effect_id, 0, sizeof(*effect_id));
+        non_keyboard_id(effect_id);
     }
     (void)effect;
     InterlockedIncrement(&g_calls[CALL_KEYPAD]);
@@ -652,7 +817,7 @@ __declspec(dllexport) RZRESULT CreateChromaLinkEffect(int effect, void* param,
                                                       RZEFFECTID* effect_id) {
     (void)param;
     if (effect_id != NULL) {
-        memset(effect_id, 0, sizeof(*effect_id));
+        non_keyboard_id(effect_id);
     }
     (void)effect;
     InterlockedIncrement(&g_calls[CALL_CHROMALINK]);
@@ -660,14 +825,46 @@ __declspec(dllexport) RZRESULT CreateChromaLinkEffect(int effect, void* param,
 }
 
 __declspec(dllexport) RZRESULT SetEffect(RZEFFECTID effect_id) {
-    // Frames are forwarded as they are created, so the two-phase
-    // create-then-set path needs nothing here beyond not failing.
-    (void)effect_id;
+    DWORD slot = 0;
+    DWORD generation = 0;
+    if (!decode_id(&effect_id, &slot, &generation) || slot == ID_NOT_KEYBOARD) {
+        // Another device's effect, or nothing we issued: nothing to show.
+        if (slot != ID_NOT_KEYBOARD) {
+            InterlockedIncrement(&g_set_unknown);
+        }
+        return RZRESULT_SUCCESS;
+    }
+
+    COLORREF grid[KB_ROWS][KB_COLS];
+    BOOL found = FALSE;
+    EnterCriticalSection(&g_store_lock);
+    if (slot < STORE_SLOTS && generation != 0 && g_store[slot].generation == generation) {
+        memcpy(grid, g_store[slot].grid, sizeof(grid));
+        found = TRUE;
+    }
+    LeaveCriticalSection(&g_store_lock);
+
+    if (!found) {
+        // Deleted, or evicted from the ring. Success anyway: an error here
+        // could make a game give up on lighting for the whole session.
+        InterlockedIncrement(&g_set_unknown);
+        return RZRESULT_SUCCESS;
+    }
+    InterlockedIncrement(&g_shown_by_set);
+    submit_frame(grid);
     return RZRESULT_SUCCESS;
 }
 
 __declspec(dllexport) RZRESULT DeleteEffect(RZEFFECTID effect_id) {
-    (void)effect_id;
+    DWORD slot = 0;
+    DWORD generation = 0;
+    if (decode_id(&effect_id, &slot, &generation) && slot < STORE_SLOTS) {
+        EnterCriticalSection(&g_store_lock);
+        if (g_store[slot].generation == generation) {
+            g_store[slot].generation = 0;
+        }
+        LeaveCriticalSection(&g_store_lock);
+    }
     return RZRESULT_SUCCESS;
 }
 
@@ -702,6 +899,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
         case DLL_PROCESS_ATTACH:
             DisableThreadLibraryCalls(instance);
             InitializeCriticalSection(&g_lock);
+            InitializeCriticalSection(&g_store_lock);
             load_config();
             shim_log("loaded, forwarding to %s:%d", g_host, g_port);
             // No thread or socket work here: DllMain runs under the loader
