@@ -233,7 +233,10 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         }
     }
 
-    if (std::filesystem::exists(keycodes_path)) {
+    // With no `keycodes` key the path above is just the config's directory,
+    // which exists -- so check for a file, or every board would get an empty
+    // keycode map that still reports itself as present.
+    if (device["keycodes"] && std::filesystem::is_regular_file(keycodes_path)) {
          config.model.setKeycodeMap(readKeycodeCsv(keycodes_path, layout));
     }
 
