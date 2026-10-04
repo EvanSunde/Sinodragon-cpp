@@ -6,13 +6,29 @@
 
 namespace kb::cfg {
 
+namespace {
+
+std::string backendList() {
+    std::string out;
+    for (const auto& name : availableWindowSources()) {
+        if (!out.empty()) {
+            out += ", ";
+        }
+        out += name;
+    }
+    return out;
+}
+
+}  // namespace
+
 // Defined by the per-backend translation units.
 std::unique_ptr<WindowSource> makeHyprlandWindowSource(const std::string& events_socket);
+std::unique_ptr<WindowSource> makeNiriWindowSource(const std::string& socket_path);
 std::unique_ptr<WindowSource> makeSwayWindowSource(const std::string& socket_path);
 std::unique_ptr<WindowSource> makeX11WindowSource();
 
 std::vector<std::string> availableWindowSources() {
-    std::vector<std::string> sources{"hyprland", "sway"};
+    std::vector<std::string> sources{"hyprland", "niri", "sway"};
 #ifdef SINODRAGON_HAVE_X11
     sources.emplace_back("x11");
 #endif
@@ -34,6 +50,9 @@ std::unique_ptr<WindowSource> createWindowSource(const std::string& preferred,
     if (choice == "hyprland") {
         return makeHyprlandWindowSource(events_socket);
     }
+    if (choice == "niri") {
+        return makeNiriWindowSource(events_socket);
+    }
     if (choice == "sway" || choice == "i3") {
         return makeSwayWindowSource(events_socket);
     }
@@ -46,14 +65,19 @@ std::unique_ptr<WindowSource> createWindowSource(const std::string& preferred,
         return source;
     }
     if (!choice.empty() && choice != "auto") {
-        std::cerr << "[Window] Unknown window_source '" << preferred << "'; falling back to auto.\n";
+        std::cerr << "[Window] Unknown window_source '" << preferred << "'; this build has: "
+                  << backendList() << ". Falling back to auto.\n";
     }
 
-    // Auto: pick whichever compositor is actually running. Hyprland and sway
-    // are checked before X11 because both can also have DISPLAY set for
-    // Xwayland, and their native protocols report app ids more accurately.
+    // Auto: pick whichever compositor is actually running. The Wayland
+    // backends are checked before X11 because all of them can also have
+    // DISPLAY set for Xwayland, and their native protocols report app ids
+    // more accurately.
     if (hyprlandAvailable()) {
         return makeHyprlandWindowSource(events_socket);
+    }
+    if (niriAvailable()) {
+        return makeNiriWindowSource(events_socket);
     }
     if (swayAvailable()) {
         return makeSwayWindowSource(events_socket);
@@ -65,6 +89,9 @@ std::unique_ptr<WindowSource> createWindowSource(const std::string& preferred,
     }
 
     std::cerr << "[Window] No supported compositor detected; automatic profile switching is off.\n"
+                 "         Looked for: "
+              << backendList()
+              << ".\n"
                  "         Drive it yourself with: sinoctl profile <name>\n";
     return nullptr;
 }
