@@ -24,14 +24,17 @@ ExecReload=/usr/local/bin/sinoctl reload
 Restart=on-failure
 RestartSec=5s
 
-# It talks to one HID device and one unix socket and nothing else.
+# It talks to one HID device, its unix control socket, and -- for Chroma
+# games -- a TCP socket bound to 127.0.0.1:54235. AF_INET is needed for that
+# last one alone; without it the Chroma server fails with "Address family not
+# supported by protocol". Drop AF_INET if you run with --no-chroma.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
 ProtectKernelTunables=true
 ProtectControlGroups=true
-RestrictAddressFamilies=AF_UNIX
+RestrictAddressFamilies=AF_UNIX AF_INET
 RestrictNamespaces=true
 MemoryDenyWriteExecute=true
 RuntimeDirectory=sinodragon

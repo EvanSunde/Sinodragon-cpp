@@ -507,6 +507,13 @@ board, as `label = "row,col"` or `label = "0xRRCC"` (an SDK `RZKEY` value):
   Fn  = "0x050C"
 ```
 
+If `chroma status` says `listening: no -- Address family not supported by
+protocol`, the daemon is running under a systemd unit that only allows unix
+sockets. The unit in `packaging/` allows `AF_INET` as of this feature; a copy
+installed before it needs updating (re-copy it, or `systemctl --user edit
+sinodragon` and add `RestrictAddressFamilies=AF_UNIX AF_INET` under
+`[Service]`), then `systemctl --user daemon-reload` and restart.
+
 Only loopback is bound, and any request carrying an `Origin` header — what a
 browser adds when a web page makes the request — is refused, so a website
 cannot drive the keyboard. Any local program can, as with Razer's own server.

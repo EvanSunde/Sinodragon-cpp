@@ -528,7 +528,15 @@ bool ChromaServer::start() {
 
     listen_fd_ = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (listen_fd_ < 0) {
-        state_->setListenError(port_, std::strerror(errno));
+        std::string reason = std::strerror(errno);
+        if (errno == EAFNOSUPPORT || errno == EPERM || errno == EACCES) {
+            // Not a missing kernel feature: a sandbox forbids IPv4 sockets.
+            // The usual culprit is a systemd unit restricting address families.
+            reason += " -- IPv4 sockets are blocked for this process; under systemd the unit "
+                      "needs RestrictAddressFamilies=AF_UNIX AF_INET";
+        }
+        state_->setListenError(port_, reason);
+        std::cerr << "[Chroma] Not listening: " << reason << '\n';
         return false;
     }
     const int yes = 1;
