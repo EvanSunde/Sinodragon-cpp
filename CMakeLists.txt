@@ -89,6 +89,7 @@ add_library(sinodragon_core STATIC
     src/configurator_cli.cpp
     src/window_source.cpp
     src/window_source_hyprland.cpp
+    src/window_source_niri.cpp
     src/window_source_sway.cpp
     src/window_source_x11.cpp
     src/json_lite.cpp

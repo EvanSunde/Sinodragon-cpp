@@ -31,6 +31,7 @@
 
 [hypr]
   enabled = true
+  # window_source = "auto"  # auto | hyprland | niri | sway | x11 | none
   [hypr.shortcuts_overlay_effect]
     type = "liquid_plasma"
     color = "#ffcb0e"

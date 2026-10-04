@@ -31,6 +31,7 @@ sinoctl chroma status      # what a Chroma-enabled game is showing
 - [Chroma games](#chroma-games)
 - [Shell completion](#shell-completion)
 - [Architecture](#architecture)
+  - [Compositors](#compositors)
 - [Packet format](#packet-format)
 
 ---
@@ -172,6 +173,15 @@ bind = SUPER, F1, exec, sinoctl profile coding
 bind = SUPER, F2, exec, sinoctl brightness 20
 ```
 
+```kdl
+// niri -- config.kdl. Each argument is its own string.
+binds {
+    Mod+F1 { spawn "sinoctl" "profile" "coding"; }
+    Mod+F2 { spawn "sinoctl" "brightness" "20"; }
+    Mod+F3 { spawn "sinoctl" "profile" "focus" "for" "25m"; }
+}
+```
+
 ---
 
 ## Configuration
@@ -199,7 +209,7 @@ One TOML file. See `configs/config.toml` for a full working example.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `enabled` | `false` | Enables window watching and the shortcut overlay |
-| `window_source` | `"auto"` | `auto`, `hyprland`, `sway`, `x11` or `none` |
+| `window_source` | `"auto"` | `auto`, `hyprland`, `niri`, `sway`, `x11` or `none` |
 | `events_socket` | auto | Override the compositor socket path |
 | `shortcuts_overlay_effect` | — | Inline effect drawn while a modifier is held |
 
@@ -554,14 +564,36 @@ With no daemon running they fall back to the static command list.
   reconnects on its own — three consecutive write failures close the handle and
   it re-enumerates on a backoff, so an unplug or a suspend/resume cycle
   recovers without a restart.
-- **`WindowSource`** abstracts focus tracking, with Hyprland, sway/i3 and X11
-  backends chosen automatically.
+- **`WindowSource`** abstracts focus tracking, with Hyprland, niri, sway/i3
+  and X11 backends chosen automatically. `auto` tries each compositor's own
+  environment variable in turn and falls back to X11, so the same config works
+  on a machine that switches between them.
 - **`SystemState`** is the shared, cached source of `/proc` readings and of
   values pushed in over the socket.
 - **`ChromaServer`** serves the Chroma SDK REST API from one `poll()` thread;
   **`ChromaState`** holds the latest frame; **`ChromaPreset`** maps it onto the
   board. The Runtime's Chroma takeover shares the save-and-restore slot that
   games and the shortcut overlay use.
+
+### Compositors
+
+| Backend | Detected by | Reports |
+| --- | --- | --- |
+| `hyprland` | `$HYPRLAND_INSTANCE_SIGNATURE` | Hyprland's event socket |
+| `niri` | `$NIRI_SOCKET` | niri's JSON IPC event stream |
+| `sway` / `i3` | `$SWAYSOCK`, `$I3SOCK` | the i3 IPC protocol |
+| `x11` | `$DISPLAY` | `_NET_ACTIVE_WINDOW` |
+
+All of them report the Wayland `app_id` (or the X11 class) as the window class
+you match in `[apps.mappings]`, plus the title for `[apps.title_rules]`. Set
+`window_source` to pin one; `events_socket` overrides the socket path for the
+backend in use, which is occasionally useful when the daemon runs outside the
+session's own environment.
+
+niri is worth one note: it reports focus changes as a bare window id, so the
+backend keeps its own table of open windows to resolve them. That table is
+rebuilt from scratch whenever niri restarts, so restarting the compositor does
+not need the daemon restarted with it.
 
 ### A note on KDE and GNOME
 
