@@ -53,6 +53,8 @@ AppOptions parseArgs(int argc, char** argv) {
             options.daemon = true;
         } else if (arg == "--no-socket") {
             options.enable_socket = false;
+        } else if (arg == "--no-chroma") {
+            options.enable_chroma = false;
         } else if (arg == "-s" || arg == "--socket") {
             if (i + 1 >= argc) {
                 options.valid = false;
@@ -107,6 +109,7 @@ std::string usageText() {
            "  -s, --socket <path>   Control socket to listen on\n"
            "                        (default: $XDG_RUNTIME_DIR/sinodragon.sock)\n"
            "      --no-socket       Do not listen for control commands\n"
+           "      --no-chroma       Do not serve the Chroma SDK REST API (port 54235)\n"
            "      --lock <path>     Single-instance lock file\n"
            "                        (default: the socket path + .lock)\n"
            "      --no-lock         Allow more than one instance (not recommended)\n"

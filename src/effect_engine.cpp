@@ -45,6 +45,7 @@ void EffectEngine::setPresets(std::vector<std::unique_ptr<LightingPreset>> prese
 
     applyKeyActivityProvider();
     applySystemState();
+    applyChromaState();
 }
 
 void EffectEngine::setPresets(std::vector<std::unique_ptr<LightingPreset>> presets,
@@ -73,6 +74,11 @@ void EffectEngine::setKeyActivityProvider(KeyActivityProviderPtr provider) {
 void EffectEngine::setSystemState(SystemStatePtr state) {
     system_state_ = std::move(state);
     applySystemState();
+}
+
+void EffectEngine::setChromaState(ChromaStatePtr state) {
+    chroma_state_ = std::move(state);
+    applyChromaState();
 }
 
 void EffectEngine::renderFrame(double time_seconds) {
@@ -240,6 +246,14 @@ void EffectEngine::applySystemState() {
     for (auto& preset : presets_) {
         if (preset) {
             preset->setSystemState(system_state_);
+        }
+    }
+}
+
+void EffectEngine::applyChromaState() {
+    for (auto& preset : presets_) {
+        if (preset) {
+            preset->setChromaState(chroma_state_);
         }
     }
 }

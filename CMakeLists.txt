@@ -76,6 +76,9 @@ add_library(sinodragon_core STATIC
     src/flappy_preset.cpp
     src/simon_preset.cpp
     src/reaction_preset.cpp
+    src/chroma_state.cpp
+    src/chroma_preset.cpp
+    src/chroma_server.cpp
     src/effect_engine.cpp
     src/runtime.cpp
     src/app_options.cpp
@@ -131,6 +134,12 @@ target_link_libraries(sinoctl
     PRIVATE
         sinodragon_core
 )
+
+# Tests. `ctest --test-dir build` runs them.
+enable_testing()
+add_executable(chroma_test tests/chroma_test.cpp)
+target_link_libraries(chroma_test PRIVATE sinodragon_core)
+add_test(NAME chroma COMMAND chroma_test ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 
 find_package(Threads REQUIRED)
 target_link_libraries(sinodragon_core PUBLIC Threads::Threads)

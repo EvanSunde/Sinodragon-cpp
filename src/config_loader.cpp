@@ -252,9 +252,47 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         }
     }
 
+    // [chroma] comes first: its key map applies to every chroma layer, which
+    // the profiles below may declare.
+    ParameterMap chroma_params;
+    if (auto chroma = tbl["chroma"].as_table()) {
+        auto& cc = config.chroma;
+        cc.listen = (*chroma)["enabled"].value_or(true);
+        cc.mode = (*chroma)["mode"].value_or(std::string{"auto"});
+        if (cc.mode != "auto" && cc.mode != "layer" && cc.mode != "off") {
+            std::cerr << "Warning: [chroma] mode '" << cc.mode
+                      << "' is not auto, layer or off; using auto.\n";
+            cc.mode = "auto";
+        }
+        const int port = (*chroma)["port"].value_or(54235);
+        cc.port = (port > 0 && port < 65536) ? port : 54235;
+        const double timeout = (*chroma)["timeout"].value_or(10.0);
+        cc.timeout = std::chrono::milliseconds(
+            static_cast<long long>(std::clamp(timeout, 1.0, 600.0) * 1000.0));
+        if (auto fill = (*chroma)["fill"].value<std::string>()) {
+            chroma_params["fill"] = *fill;
+        }
+        // [chroma.map] Label = "row,col" -- for keys the built-in table places
+        // wrongly on an unusual board.
+        if (auto map = (*chroma)["map"].as_table()) {
+            std::string entries;
+            for (auto& [label, cell] : *map) {
+                if (!entries.empty()) entries += ';';
+                entries += std::string(label.str()) + '=' + cell.value_or(std::string{});
+            }
+            chroma_params["map"] = entries;
+        }
+    }
+
     auto createPreset = [&](const std::string& type,
                             ParameterMap params,
                             LayerStyle style = LayerStyle{}) -> std::optional<std::size_t> {
+        if (type == "chroma") {
+            // A layer's own settings win; anything it leaves out comes from [chroma].
+            for (const auto& [key, value] : chroma_params) {
+                params.emplace(key, value);
+            }
+        }
         auto preset = registry_.create(type);
         if (!preset) {
             std::cerr << "Warning: Unknown preset type '" << type << "'.\n";
@@ -504,6 +542,14 @@ RuntimeConfig ConfigLoader::loadFromFile(const std::string& path) const {
         }
 
         config.hypr = std::move(hcfg);
+    }
+
+    // The layer auto mode switches to. Appended after everything else so it
+    // never shifts the index of a layer a profile refers to.
+    if (config.chroma.listen) {
+        if (auto index = createPreset("chroma", ParameterMap{})) {
+            config.chroma.preset_index = static_cast<int>(*index);
+        }
     }
 
     return config;

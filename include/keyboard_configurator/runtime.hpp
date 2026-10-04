@@ -10,6 +10,7 @@
 #include <thread>
 #include <vector>
 
+#include "keyboard_configurator/chroma_state.hpp"
 #include "keyboard_configurator/config_loader.hpp"
 #include "keyboard_configurator/effect_engine.hpp"
 #include "keyboard_configurator/key_activity.hpp"
@@ -57,6 +58,8 @@ public:
     [[nodiscard]] const KeyboardModel& model() const noexcept { return model_; }
     [[nodiscard]] KeyActivityProviderPtr keyActivity() const noexcept { return key_activity_; }
     [[nodiscard]] SystemStatePtr systemState() const noexcept { return system_state_; }
+    [[nodiscard]] ChromaStatePtr chromaState() const noexcept { return chroma_state_; }
+    [[nodiscard]] ChromaConfig chromaConfig() const;
     // Returns a copy, not a reference: reload() replaces hypr_ under the
     // engine lock, so handing out a reference would let a caller read it
     // while the config watcher is rewriting it.
@@ -109,6 +112,15 @@ public:
     void startConfigWatch();
     void stopConfigWatch();
 
+    // --- Chroma SDK apps (called from ChromaServer's thread) ---
+    // A frame arrived. In auto mode this takes the keyboard over -- the same
+    // save-and-restore a running game uses -- unless a game already owns it or
+    // the profile showing has its own chroma layer. Either way it wakes the
+    // render loop, which is the only reason a non-animated chroma layer draws.
+    void chromaFrame();
+    // The last app sending frames went away: hand the keyboard back.
+    void chromaIdle();
+
 private:
     void renderLoop();
     void renderAndPush(double time_seconds);
@@ -138,6 +150,8 @@ private:
     std::string cmdGame(const std::string& args);
     std::string cmdComplete(const std::string& args);
     std::string cmdPomodoro(const std::string& args);
+    std::string cmdChroma(const std::string& args);
+    std::string describeChroma();
     std::string listGames();
 
     // A running game owns the whole keyboard; these save and restore the
@@ -149,10 +163,20 @@ private:
     // mutex (e.g. cmdGame) can reuse them without re-locking.
     void overlayDisengageLocked();
 
-    // True while a game or the shortcut overlay owns the display, i.e. while
-    // base-profile changes must be stored for later rather than shown now.
+    // A Chroma app owns the display, like a game does, while it sends frames.
+    void applyChromaOverrideLocked();
+    void clearChromaOverrideLocked();
+    // Engages the takeover if auto mode and the current state allow it.
+    void maybeEngageChromaLocked();
+    // True when the profile underneath any override already draws a chroma
+    // layer of its own, so taking over would only hide the rest of it.
+    [[nodiscard]] bool chromaLayerInBaseLocked() const;
+
+    // True while a game, the shortcut overlay or a Chroma app owns the
+    // display, i.e. while base-profile changes must be stored for later rather
+    // than shown now.
     [[nodiscard]] bool baseOverriddenLocked() const {
-        return game_override_active_ || overlay_active_;
+        return game_override_active_ || overlay_active_ || chroma_override_active_;
     }
 
     // Reports whether a freshly loaded config still describes the device we
@@ -166,6 +190,8 @@ private:
     EffectEngine engine_;
     KeyActivityProviderPtr key_activity_;
     SystemStatePtr system_state_;
+    ChromaStatePtr chroma_state_;
+    ChromaConfig chroma_config_;
 
     std::string config_path_;
     std::vector<ParameterMap> preset_parameters_;
@@ -206,10 +232,13 @@ private:
     std::vector<std::size_t> current_draw_list_;
     std::vector<std::vector<bool>> current_masks_;
 
-    // A game and the shortcut overlay are mutually exclusive owners of the
-    // display; both save the interrupted profile into the same slot below.
+    // A game, the shortcut overlay and a Chroma app are mutually exclusive
+    // owners of the display; all save the interrupted profile into the same
+    // slot below. A game outranks a Chroma app, which outranks the overlay --
+    // in a game you hold Shift constantly, and the overlay would flicker.
     bool game_override_active_{false};
     bool overlay_active_{false};
+    bool chroma_override_active_{false};
     std::string active_game_;
     std::vector<std::size_t> saved_draw_list_;
     std::vector<std::vector<bool>> saved_masks_;

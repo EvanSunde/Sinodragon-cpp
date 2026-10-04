@@ -72,6 +72,9 @@ _sinoctl() {
         pomodoro)
             (( argno == 1 )) && COMPREPLY=( $(compgen -W "start pause reset skip status" -- "$cur") )
             ;;
+        chroma)
+            (( argno == 1 )) && COMPREPLY=( $(compgen -W "auto layer off status" -- "$cur") )
+            ;;
         -s|--socket)
             _filedir 2>/dev/null
             ;;
@@ -88,6 +91,6 @@ _sinodragon() {
             return ;;
     esac
     COMPREPLY=( $(compgen -W "-c --config -d --daemon -p --preview -s --socket \
-        --no-socket --lock --no-lock -h --help -v --version" -- "$cur") )
+        --no-socket --no-chroma --lock --no-lock -h --help -v --version" -- "$cur") )
 }
 complete -F _sinodragon sinodragon

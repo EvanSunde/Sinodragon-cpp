@@ -53,6 +53,22 @@ struct HyprConfig {
     std::unordered_map<std::string, ShortcutProfileConfig> shortcuts;
 };
 
+// [chroma]: frames from Razer Chroma SDK apps, served on the Chroma REST port.
+struct ChromaConfig {
+    // Serve the REST API at all. Changing it needs a restart.
+    bool listen{true};
+    // auto:  take the keyboard over while an app is sending frames
+    // layer: never take over; frames show only where a profile has a chroma layer
+    // off:   accept apps (so they keep running) but show nothing
+    std::string mode{"auto"};
+    int port{54235};
+    // How long an app may go without a frame or heartbeat before it is
+    // treated as gone and the keyboard handed back.
+    std::chrono::milliseconds timeout{10000};
+    // The built-in chroma layer auto mode shows, or -1.
+    int preset_index{-1};
+};
+
 struct RuntimeConfig {
     KeyboardModel model;
     std::unique_ptr<DeviceTransport> transport;
@@ -74,6 +90,8 @@ struct RuntimeConfig {
     bool config_watch_mode{false};
     
     std::optional<HyprConfig> hypr;
+
+    ChromaConfig chroma;
 };
 
 class ConfigLoader {

@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "keyboard_configurator/chroma_state.hpp"
 #include "keyboard_configurator/key_activity.hpp"
 #include "keyboard_configurator/key_color_frame.hpp"
 #include "keyboard_configurator/keyboard_model.hpp"
@@ -26,6 +27,9 @@ public:
 
     // Only the data-driven presets care; the rest ignore it.
     virtual void setSystemState(SystemStatePtr state) { (void)state; }
+
+    // Frames from Razer Chroma SDK apps; only the chroma preset uses it.
+    virtual void setChromaState(ChromaStatePtr state) { (void)state; }
 };
 
 }  // namespace kb::cfg

@@ -1,0 +1,10 @@
+# Used by chroma_test: the same board with no keycodes CSV, so the mapping has
+# to fall back to layout labels.
+[device]
+  name = "test"
+  layout = "../configs/example_layout.csv"
+  transport = "logging"
+
+[chroma]
+  mode = "layer"
+  fill = "#102030"

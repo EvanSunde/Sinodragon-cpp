@@ -13,6 +13,7 @@ sinoctl profile magma      # switch profiles
 sinoctl brightness 40      # dim it
 sinoctl game tetris start  # play something
 sinoctl state build fail   # turn the F row red from a CI script
+sinoctl chroma status      # what a Chroma-enabled game is showing
 ```
 
 ---
@@ -27,6 +28,7 @@ sinoctl state build fail   # turn the F row red from a CI script
 - [Games](#games)
 - [System-state layers](#system-state-layers)
 - [Temporary profiles](#temporary-profiles)
+- [Chroma games](#chroma-games)
 - [Shell completion](#shell-completion)
 - [Architecture](#architecture)
 - [Packet format](#packet-format)
@@ -101,6 +103,7 @@ sinodragon [options] [config.toml]
                         to the keyboard (implies --daemon)
   -s, --socket <path>   Control socket to listen on
       --no-socket       Do not listen for control commands
+      --no-chroma       Do not serve the Chroma SDK REST API (port 54235)
       --lock <path>     Single-instance lock file (default: socket path + .lock)
       --no-lock         Allow more than one instance (not recommended)
   -h, --help            Show this help
@@ -146,6 +149,7 @@ The same commands work at the interactive prompt and through `sinoctl`.
 | `metric <name> <0..1>` | Feed a value to a `system_meter` layer |
 | `state <name> <value>` | Set a `status_light` state |
 | `pomodoro <start\|pause\|reset\|skip\|status>` | Drive a `pomodoro` layer |
+| `chroma [auto\|layer\|off\|status]` | What to do with Chroma SDK game lighting — see [Chroma games](#chroma-games) |
 | `complete <profiles\|games\|commands>` | Names for shell completion |
 | `reload` | Re-read the config in place |
 | `watch <on\|off>` | Watch the config file for changes |
@@ -300,6 +304,7 @@ the `[device]` section needs a new handle, so that one restarts the runtime.
 | `pomodoro` | Work/break timer as a bar — see below |
 | `system_meter` | A value as a bar — see below |
 | `status_light` | An externally driven state — see below |
+| `chroma` | Frames from a Chroma-enabled game. `fill`, `map` — see [Chroma games](#chroma-games) |
 
 `liquid_plasma`, `smoke`, `reaction_diffusion` and `space_colonization` accept
 `reactive = true` and a family of `reactive_*` parameters that warp the field
@@ -416,6 +421,98 @@ a bare number means seconds. `profile <name>` with no duration cancels a hold.
 
 ---
 
+## Chroma games
+
+Games with Razer Chroma support — Dead Cells, Dying Light and hundreds more —
+light the keyboard themselves: health bars, damage flashes, ability cooldowns.
+The daemon speaks the Chroma SDK REST API on `127.0.0.1:54235`, so that
+lighting lands on this keyboard with no Razer software involved.
+
+Two kinds of game reach it:
+
+- **REST games** talk to port 54235 directly. Nothing to set up.
+- **DLL games** link `RzChromaSDK64.dll`, which under Wine/Proton fails and
+  disables their lighting. Drop the replacement from `tools/chroma-shim/` next
+  to the game's `.exe` and it forwards the game's calls to the daemon. See
+  [its README](tools/chroma-shim/README.md) for building it and for checking
+  which kind a game is.
+
+What a game sends is a picture, not data: Dead Cells paints a green bar along
+the number row whose length is your health, on a pink background. Chroma
+addresses a fixed 6×22 grid; each cell is mapped onto this board by evdev
+keycode (from the `keycodes` CSV), then by layout label, so the same frame
+lands on the right keys whatever the physical layout.
+
+### Modes
+
+```bash
+sinoctl chroma auto     # default: a game sending frames takes the keyboard over
+sinoctl chroma layer    # never take over; frames show only in a chroma layer
+sinoctl chroma off      # games keep running, nothing is shown
+sinoctl chroma status   # who is connected, frames received, what is showing
+```
+
+In `auto`, the first frame a game sends takes the keyboard over the same way a
+built-in game does — the profile underneath is saved, window switches keep
+updating it, and it comes back when the game leaves: when it unregisters on a
+clean exit, or when it has sent neither a frame nor a heartbeat for `timeout`
+seconds (a crash). A built-in game outranks a Chroma one, and the shortcut
+overlay stays off while a Chroma game is showing — in a game you hold Shift
+constantly.
+
+Nothing polls. A frame arriving wakes the render thread, which draws it once;
+with no game connected the server thread sleeps in `poll()` and the daemon
+sends the keyboard nothing.
+
+### Placing the frames yourself
+
+To keep your own lighting and show the game only on some keys, put a `chroma`
+layer in the profile for the game's window. When the active profile already has
+one, `auto` leaves it alone instead of taking over:
+
+```toml
+[zones]
+  numbers = ["Backtick", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "Minus", "Equal"]
+
+[apps.mappings]
+  # Proton games get the class steam_app_<id>; `hyprctl clients` (or xprop)
+  # shows the real one.
+  "steam_app_588650" = "deadcells"
+
+[[profiles.deadcells.layers]]
+  type = "liquid_plasma"
+
+[[profiles.deadcells.layers]]
+  type = "chroma"
+  zones = ["numbers"]                # just the health bar
+  blend = "screen"
+```
+
+### `[chroma]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | Serve the REST API at all. Needs a restart to change |
+| `mode` | `"auto"` | `auto`, `layer` or `off`; `chroma <mode>` changes it at runtime |
+| `port` | `54235` | The port Chroma clients use. Change only for testing |
+| `timeout` | `10.0` | Seconds of silence before a game is treated as gone |
+| `fill` | `"dominant"` | Colour for keys with no Chroma cell: `dominant` (the frame's most common colour), `black`, or `"#RRGGBB"` |
+
+`[chroma.map]` fixes keys the built-in table places wrongly on an unusual
+board, as `label = "row,col"` or `label = "0xRRCC"` (an SDK `RZKEY` value):
+
+```toml
+[chroma.map]
+  Del = "2,15"
+  Fn  = "0x050C"
+```
+
+Only loopback is bound, and any request carrying an `Origin` header — what a
+browser adds when a web page makes the request — is refused, so a website
+cannot drive the keyboard. Any local program can, as with Razer's own server.
+
+---
+
 ## Shell completion
 
 Completions for bash, zsh and fish live in `packaging/completions/`. They ask
@@ -461,6 +558,10 @@ With no daemon running they fall back to the static command list.
   backends chosen automatically.
 - **`SystemState`** is the shared, cached source of `/proc` readings and of
   values pushed in over the socket.
+- **`ChromaServer`** serves the Chroma SDK REST API from one `poll()` thread;
+  **`ChromaState`** holds the latest frame; **`ChromaPreset`** maps it onto the
+  board. The Runtime's Chroma takeover shares the save-and-restore slot that
+  games and the shortcut overlay use.
 
 ### A note on KDE and GNOME
 

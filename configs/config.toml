@@ -686,3 +686,11 @@
   num = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
   numpad = ["Num1", "Num2", "Num3", "Num4", "Num5", "Num6", "Num7", "Num8", "Num9", "Num0"]
   wasd = ["W", "A", "S", "D"]
+
+# Lighting from Razer Chroma-enabled games (see "Chroma games" in the README).
+# These are the defaults; the section can be left out entirely.
+[chroma]
+  enabled = true      # serve the Chroma SDK REST API on 127.0.0.1:54235
+  mode = "auto"       # auto | layer | off -- `sinoctl chroma <mode>` at runtime
+  timeout = 10.0      # seconds of silence before a game counts as gone
+  fill = "dominant"   # keys with no Chroma cell: dominant | black | "#RRGGBB"

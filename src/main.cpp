@@ -6,6 +6,8 @@
 #include <thread>
 
 #include "keyboard_configurator/app_options.hpp"
+#include "keyboard_configurator/chroma_preset.hpp"
+#include "keyboard_configurator/chroma_server.hpp"
 #include "keyboard_configurator/config_loader.hpp"
 #include "keyboard_configurator/configurator_cli.hpp"
 #include "keyboard_configurator/control_server.hpp"
@@ -77,6 +79,7 @@ PresetRegistry buildRegistry() {
     registry.registerPreset("flappy", [] { return std::make_unique<FlappyPreset>(); });
     registry.registerPreset("simon", [] { return std::make_unique<SimonPreset>(); });
     registry.registerPreset("reaction", [] { return std::make_unique<ReactionPreset>(); });
+    registry.registerPreset("chroma", [] { return std::make_unique<ChromaPreset>(); });
     return registry;
 }
 
@@ -198,6 +201,23 @@ int main(int argc, char** argv) {
                 }
             }
 
+            // Razer Chroma SDK apps: games through the chroma-shim DLL, and
+            // anything speaking the REST API directly. Frames are pushed in,
+            // so nothing here polls.
+            std::unique_ptr<ChromaServer> chroma;
+            const ChromaConfig chroma_config = runtime.chromaConfig();
+            if (chroma_config.listen && options.enable_chroma) {
+                ChromaServer::Callbacks callbacks;
+                callbacks.on_frame = [&runtime] { runtime.chromaFrame(); };
+                callbacks.on_idle = [&runtime] { runtime.chromaIdle(); };
+                chroma = std::make_unique<ChromaServer>(runtime.chromaState(), chroma_config.port,
+                                                        chroma_config.timeout, std::move(callbacks));
+                if (!chroma->start()) {
+                    // Lighting works without it; `chroma status` says why.
+                    chroma.reset();
+                }
+            }
+
             if (options.daemon) {
                 std::cout << "[Main] Running in daemon mode; send SIGTERM to stop.\n" << std::flush;
                 waitForShutdown(runtime);
@@ -208,6 +228,10 @@ int main(int argc, char** argv) {
 
             if (control) {
                 control->stop();
+            }
+            // Before the runtime goes: its callbacks point into it.
+            if (chroma) {
+                chroma->stop();
             }
             if (key_watcher) {
                 key_watcher->stop();

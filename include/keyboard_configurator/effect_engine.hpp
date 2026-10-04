@@ -29,6 +29,7 @@ public:
 
     void setKeyActivityProvider(KeyActivityProviderPtr provider);
     void setSystemState(SystemStatePtr state);
+    void setChromaState(ChromaStatePtr state);
 
     // Legacy methods
     void setPresetEnabled(std::size_t index, bool enabled);
@@ -56,6 +57,7 @@ public:
 private:
     void applyKeyActivityProvider();
     void applySystemState();
+    void applyChromaState();
 
     const KeyboardModel& model_;
     DeviceTransport& transport_;
@@ -75,6 +77,7 @@ private:
     std::vector<LayerStyle> preset_styles_;
     KeyActivityProviderPtr key_activity_provider_;
     SystemStatePtr system_state_;
+    ChromaStatePtr chroma_state_;
 
     // Scratch buffer for the layer currently being composited. Kept as a
     // member so a frame costs no allocations.

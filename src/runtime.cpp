@@ -85,6 +85,8 @@ Runtime::Runtime(RuntimeConfig config, std::string config_path, const ConfigLoad
       engine_(model_, *transport_),
       key_activity_(std::make_shared<KeyActivityProvider>(model_.keyCount())),
       system_state_(std::make_shared<SystemState>()),
+      chroma_state_(std::make_shared<ChromaState>()),
+      chroma_config_(config.chroma),
       config_path_(std::move(config_path)),
       preset_parameters_(std::move(config.preset_parameters)),
       hypr_(std::move(config.hypr)) {
@@ -94,6 +96,8 @@ Runtime::Runtime(RuntimeConfig config, std::string config_path, const ConfigLoad
 
     engine_.setKeyActivityProvider(key_activity_);
     engine_.setSystemState(system_state_);
+    engine_.setChromaState(chroma_state_);
+    chroma_state_->setEnabled(chroma_config_.mode != "off");
     engine_.setPresets(std::move(config.presets), std::move(config.preset_masks));
     engine_.setLayerStyles(std::move(config.preset_styles));
     for (std::size_t i = 0; i < config.preset_enabled.size(); ++i) {
@@ -456,6 +460,12 @@ std::string Runtime::reload() {
         // be handed to the new instances.
         engine_.setKeyActivityProvider(key_activity_);
         engine_.setSystemState(system_state_);
+        engine_.setChromaState(chroma_state_);
+        // The server is already bound, so listen/port/timeout stay as they
+        // were; the mode and the built-in layer's index follow the new file.
+        chroma_config_.mode = fresh.chroma.mode;
+        chroma_config_.preset_index = fresh.chroma.preset_index;
+        chroma_state_->setEnabled(chroma_config_.mode != "off");
         for (std::size_t i = 0; i < fresh.preset_enabled.size(); ++i) {
             engine_.setPresetEnabled(i, fresh.preset_enabled[i]);
         }
@@ -469,6 +479,7 @@ std::string Runtime::reload() {
         // composition pointing at the old ones has to go.
         game_override_active_ = false;
         overlay_active_ = false;
+        chroma_override_active_ = false;  // The next frame re-engages it.
         temporary_profile_active_ = false;
         revert_profile_.clear();
         active_game_.clear();
@@ -530,6 +541,7 @@ std::string Runtime::execute(const std::string& line) {
                "  game list                 list configured games\n"
                "  game <name> <start|stop>  run a game, from those `game list` shows\n"
                "  pomodoro <start|pause|reset|skip|status>\n"
+               "  chroma [auto|layer|off|status]  Chroma SDK game lighting\n"
                "  reload                    re-read the config file in place\n"
                "  metric <name> <0..1>      feed a value to a system_meter layer\n"
                "  state <name> <value>      set a status_light state (ok/warn/fail/busy/off)\n"
@@ -578,6 +590,9 @@ std::string Runtime::execute(const std::string& line) {
     if (cmd == "pomodoro") {
         return cmdPomodoro(args);
     }
+    if (cmd == "chroma") {
+        return cmdChroma(args);
+    }
     if (cmd == "snake") {
         // Kept as an alias; `game snake start` is the general form.
         return cmdGame("snake " + (args.empty() ? std::string("start") : args));
@@ -615,6 +630,10 @@ std::string Runtime::describeStatus() {
     }
     if (!active_game_.empty()) {
         out << "game:      " << active_game_ << '\n';
+    }
+    if (chroma_override_active_) {
+        const auto chroma = chroma_state_->status();
+        out << "chroma:    showing " << (chroma.app.empty() ? std::string("an app") : chroma.app) << '\n';
     }
     out << "watching:  " << (config_watch_enabled_.load() ? config_path_ : std::string("off"));
     return out.str();
@@ -877,7 +896,7 @@ std::string Runtime::cmdComplete(const std::string& args) {
         static const char* kCommands[] = {
             "help",  "status", "list",   "profiles", "profile", "brightness", "frame",
             "set",   "toggle", "game",   "metric",   "state",   "reload",     "watch",
-            "quit",  "complete", "pomodoro",
+            "quit",  "complete", "pomodoro", "chroma",
         };
         for (const char* command : kCommands) {
             out << command << '\n';
@@ -1004,6 +1023,7 @@ std::string Runtime::cmdGame(const std::string& args) {
             // If a modifier is being held, reveal the base first so the game
             // saves the real profile, not the overlay, as what to restore.
             overlayDisengageLocked();
+            clearChromaOverrideLocked();
             target->startGame(model_);
             engine_.setPresetEnabled(target_index, true);
             applyGameOverrideLocked(target_index);
@@ -1060,8 +1080,9 @@ void Runtime::clearGameOverrideLocked() {
 bool Runtime::overlayEngage(std::size_t preset_index) {
     {
         std::lock_guard<std::mutex> guard(engine_mutex_);
-        if (preset_index >= engine_.presetCount() || game_override_active_) {
-            return false;  // no overlay over a running game
+        if (preset_index >= engine_.presetCount() || game_override_active_ ||
+            chroma_override_active_) {
+            return false;  // no overlay over a running game, ours or a Chroma one
         }
         if (!overlay_active_) {
             // Save the profile currently showing; it is what disengage reveals,
@@ -1118,6 +1139,168 @@ void Runtime::overlayDisengage() {
         overlayDisengageLocked();
     }
     wake();
+}
+
+// --- Chroma SDK apps ---------------------------------------------------------
+
+ChromaConfig Runtime::chromaConfig() const {
+    std::lock_guard<std::mutex> guard(engine_mutex_);
+    return chroma_config_;
+}
+
+bool Runtime::chromaLayerInBaseLocked() const {
+    const auto& base = (baseOverriddenLocked() && saved_state_valid_) ? saved_draw_list_
+                                                                      : current_draw_list_;
+    for (std::size_t index : base) {
+        if (static_cast<int>(index) != chroma_config_.preset_index &&
+            index < engine_.presetCount() && engine_.presetAt(index).id() == "chroma") {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Runtime::applyChromaOverrideLocked() {
+    const auto index = static_cast<std::size_t>(chroma_config_.preset_index);
+    if (!chroma_override_active_) {
+        saved_draw_list_ = current_draw_list_;
+        saved_masks_ = current_masks_;
+        saved_state_valid_ = true;
+        chroma_override_active_ = true;
+    }
+    const std::vector<std::size_t> only = {index};
+    engine_.setDrawList(only);
+    current_draw_list_ = only;
+    engine_.setPresetMask(index, std::vector<bool>(model_.keyCount(), true));
+}
+
+void Runtime::clearChromaOverrideLocked() {
+    if (!chroma_override_active_) {
+        return;
+    }
+    chroma_override_active_ = false;
+
+    if (saved_state_valid_) {
+        if (saved_masks_.size() == engine_.presetCount()) {
+            engine_.setPresetMasks(saved_masks_, true);
+            current_masks_ = saved_masks_;
+        }
+        engine_.setDrawList(saved_draw_list_);
+        current_draw_list_ = saved_draw_list_;
+    }
+
+    saved_state_valid_ = false;
+    saved_draw_list_.clear();
+    saved_masks_.clear();
+}
+
+void Runtime::maybeEngageChromaLocked() {
+    if (chroma_config_.mode != "auto" || chroma_override_active_ || game_override_active_) {
+        return;
+    }
+    const int index = chroma_config_.preset_index;
+    if (index < 0 || static_cast<std::size_t>(index) >= engine_.presetCount()) {
+        return;
+    }
+    if (chromaLayerInBaseLocked()) {
+        return;  // The profile places the frames itself; leave it be.
+    }
+    // If a modifier is held, reveal the base first so the takeover saves the
+    // real profile, not the shortcut overlay, as what to restore.
+    overlayDisengageLocked();
+    applyChromaOverrideLocked();
+}
+
+void Runtime::chromaFrame() {
+    {
+        std::lock_guard<std::mutex> guard(engine_mutex_);
+        maybeEngageChromaLocked();
+    }
+    wake();
+}
+
+void Runtime::chromaIdle() {
+    {
+        std::lock_guard<std::mutex> guard(engine_mutex_);
+        clearChromaOverrideLocked();
+    }
+    wake();
+}
+
+std::string Runtime::describeChroma() {
+    const auto status = chroma_state_->status();
+    std::lock_guard<std::mutex> guard(engine_mutex_);
+    std::ostringstream out;
+    out << "mode:      " << chroma_config_.mode << '\n';
+    if (status.listening) {
+        out << "listening: 127.0.0.1:" << status.port << '\n';
+    } else if (!status.listen_error.empty()) {
+        out << "listening: no -- " << status.listen_error << '\n';
+    } else {
+        out << "listening: no (disabled in [chroma] or with --no-chroma)\n";
+    }
+    out << "sessions:  " << status.sessions << '\n';
+    if (status.frames > 0) {
+        const auto ago = std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                                       status.last_frame)
+                             .count();
+        std::ostringstream age;
+        age.setf(std::ios::fixed);
+        age.precision(1);
+        age << ago;
+        out << "last app:  " << status.app << " (" << status.frames << " frames, last " << age.str()
+            << "s ago)\n";
+    }
+    if (chroma_override_active_) {
+        out << "showing:   yes, over the active profile";
+    } else if (game_override_active_) {
+        out << "showing:   no -- a game owns the keyboard";
+    } else if (chromaLayerInBaseLocked()) {
+        out << "showing:   in the active profile's chroma layer";
+    } else {
+        out << "showing:   no";
+    }
+    return out.str();
+}
+
+// No polling to switch on or off: frames are pushed in by the server as they
+// arrive. These only decide what happens to them.
+std::string Runtime::cmdChroma(const std::string& args) {
+    const auto [action, ignored] = splitCommand(args);
+    (void)ignored;
+
+    if (action.empty() || action == "status") {
+        return describeChroma();
+    }
+
+    std::string reply;
+    {
+        std::lock_guard<std::mutex> guard(engine_mutex_);
+        if (action == "auto" || action == "on") {
+            chroma_config_.mode = "auto";
+            chroma_state_->setEnabled(true);
+            // An app may already be mid-stream; show it now, not on its next frame.
+            ChromaState::Grid probe{};
+            if (chroma_state_->grid(probe) != 0) {
+                maybeEngageChromaLocked();
+            }
+            reply = "Chroma: auto -- apps sending frames take the keyboard over.";
+        } else if (action == "layer") {
+            chroma_config_.mode = "layer";
+            chroma_state_->setEnabled(true);
+            clearChromaOverrideLocked();
+            reply = "Chroma: layer -- frames show only in profiles with a chroma layer.";
+        } else if (action == "off") {
+            chroma_config_.mode = "off";
+            chroma_state_->setEnabled(false);
+            clearChromaOverrideLocked();
+            reply = "Chroma: off -- apps keep running, but nothing is shown.";
+        } else {
+            return "Usage: chroma [auto|layer|off|status]";
+        }
+    }
+    wake();
+    return reply;
 }
 
 // --- Config watching -------------------------------------------------------

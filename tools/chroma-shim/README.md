@@ -2,7 +2,9 @@
 
 A stand-in `RzChromaSDK64.dll` for Chroma-integrated games running under Wine
 or Proton. It answers the SDK calls itself and forwards the per-key frames a
-game produces to a Chroma REST server on the host.
+game produces to the Chroma REST API on the host -- which the sinodragon daemon
+serves on `127.0.0.1:54235`, so with the daemon running the game lights the
+keyboard directly.
 
 ## Why it is needed
 
@@ -81,9 +83,10 @@ game does -- `LoadLibrary`, `GetProcAddress`, `Init`, a static frame, a marked
 grid, then 120 frames at ~60 Hz:
 
 ```bash
-python3 chroma_mock_server.py &
+mkdir -p /tmp/chromatest
 cp RzChromaSDK64.dll chroma_test.exe /tmp/chromatest/ && cd /tmp/chromatest
-wine chroma_test.exe
+wine chroma_test.exe          # with the daemon running: the keyboard flashes
+sinoctl chroma status         # ...and this shows the frames arriving
 ```
 
 The marked grid puts pure red, green and blue in the first three cells, so a
@@ -130,15 +133,27 @@ not be loaded by it.
 
 ## Run
 
-Start a Chroma REST server on the host first — `chroma_mock_server.py` logs
-every request, which is what you want while working out what a game sends:
+With the daemon running, just start the game:
 
 ```bash
-python3 chroma_mock_server.py
-wine "$GAME_DIR/Game.exe"
+sinodragon --daemon &          # or the systemd unit
+wine "$GAME_DIR/Game.exe"      # or Steam, with the DLL beside the game's .exe
 ```
 
 Enable the game's Chroma option in its own settings; most ship with it off.
+The first frame takes the keyboard over and quitting hands it back -- see
+"Chroma games" in the main README for `sinoctl chroma auto|layer|off|status`.
+
+### Seeing exactly what a game sends
+
+`chroma_mock_server.py` logs every request instead of lighting anything, which
+is the tool for working out what a new game does. It needs port 54235, so start
+the daemon with `--no-chroma` (or stop it) first:
+
+```bash
+python3 chroma_mock_server.py            # one summary line per frame; -v for grids
+wine "$GAME_DIR/Game.exe"
+```
 
 ## Troubleshooting
 
@@ -181,8 +196,8 @@ Dead Cells, mid-run, sends `CHROMA_CUSTOM` grids at roughly 15 Hz: a `#FF005A`
 background with a green bar along row 1 (the number row) whose length tracks
 health. So the semantic state is there, but only as pixels -- the count of lit
 cells in that row is the health reading, and there is no other channel carrying
-it. That is the shape of every Chroma integration, and the reason a sink layer
-composites frames rather than interpreting them.
+it. That is the shape of every Chroma integration, and the reason the daemon's
+`chroma` layer composites frames rather than interpreting them.
 
 ## What it forwards
 

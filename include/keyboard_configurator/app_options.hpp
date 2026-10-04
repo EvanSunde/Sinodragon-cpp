@@ -11,6 +11,7 @@ struct AppOptions {
     bool daemon{false};
     bool preview{false};
     bool enable_socket{true};
+    bool enable_chroma{true};
     bool single_instance{true};
     bool show_help{false};
     bool show_version{false};

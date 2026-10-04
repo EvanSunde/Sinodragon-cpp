@@ -48,6 +48,7 @@ _sinoctl_main() {
         brightness) _values 'brightness' '0' '25' '50' '75' '100' ;;
         complete)   _values 'what' 'commands' 'profiles' 'games' ;;
         pomodoro)   _values 'action' 'start' 'pause' 'reset' 'skip' 'status' ;;
+        chroma)     _values 'mode' 'auto' 'layer' 'off' 'status' ;;
       esac ;;
   esac
 }
@@ -59,6 +60,7 @@ _sinodragon_main() {
     '(-p --preview)'{-p,--preview}'[draw frames in the terminal]' \
     '(-s --socket)'{-s,--socket}'[control socket]:socket:_files' \
     '--no-socket[do not listen for control commands]' \
+    '--no-chroma[do not serve the Chroma SDK REST API]' \
     '--lock[single-instance lock file]:lock:_files' \
     '--no-lock[allow more than one instance]' \
     '(-h --help)'{-h,--help}'[show help]' \

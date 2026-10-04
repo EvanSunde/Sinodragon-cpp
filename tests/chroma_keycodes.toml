@@ -1,0 +1,13 @@
+# Used by chroma_test: the example board, identified by evdev keycodes.
+[device]
+  name = "test"
+  layout = "../configs/example_layout.csv"
+  keycodes = "../configs/example_keycodes.csv"
+  transport = "logging"
+
+[chroma]
+  port = 54299
+  timeout = 3.0
+  [chroma.map]
+    # Deliberately wrong, to prove an explicit entry beats the built-in table.
+    Pause = "0,1"
